@@ -1,0 +1,7 @@
+streamlit
+yfinance>=0.2.54
+curl_cffi
+pandas
+lxml
+requests
+openpyxl
