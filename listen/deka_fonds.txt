@@ -1,0 +1,33 @@
+# Deka-Fonds und Deka-ETFs (Planspiel Börse, Stand 07.10.2026)
+# ISINs werden von der App automatisch in Yahoo-Ticker übersetzt.
+DE0008474511   # AriDeka CF
+DE0009771923   # Deka-Digitale Kommunikation
+DE000DK2CDS0   # Deka-DividendenStrategie CF (A)
+LU0107368036   # Deka-ESG BasisStrategie Renten CF
+DE0005896872   # Deka-Europa Balance CF
+DE000DK0ECU8   # Deka-GlobalChampions CF
+LU1508359509   # Deka-Industrie 4.0 CF
+DE0005152706   # Deka-Megatrends CF
+DE0005896864   # Deka-Stiftungen Balance
+DE000DK0ECT0   # Deka-UmweltInvest TF
+DE0008474503   # DekaFonds CF
+DE000DK2D7T7   # DekaFonds TF
+LU0052859252   # DekaLuxTeam Aktien Asien CF
+DE0008474669   # DekaSpezial CF
+DE0008474750   # DekaTresor
+DE000ETFL011   # Deka DAX UCITS ETF
+DE000ETFL029   # Deka EURO STOXX 50 UCITS ETF
+DE000ETFL441   # Deka MDAX UCITS ETF
+DE000ETFL326   # Deka MSCI China ex A Shares UCITS ETF
+D6RS.DE        # Deka MSCI EMU Climate Change ESG UCITS ETF (DE000ETFL557)
+DE000ETFL342   # Deka MSCI Emerging Markets ESG Focus Select UCITS ETF
+D6RR.DE        # Deka MSCI Europe Climate Change ESG UCITS ETF (DE000ETFL565)
+D6RT.DE        # Deka MSCI Germany Climate Change ESG UCITS ETF (DE000ETFL540)
+DE000ETFL300   # Deka MSCI Japan UCITS ETF
+D6RQ.DE        # Deka MSCI USA Climate Change ESG UCITS ETF (DE000ETFL573)
+D6RP.DE        # Deka MSCI World Climate Change ESG UCITS ETF (DE000ETFL581)
+DE000ETFL508   # Deka MSCI World UCITS ETF
+DE000ETFL623   # Deka Nasdaq-100 UCITS ETF
+ELFB.DE        # Deka Oekom Euro Nachhaltigkeit UCITS ETF (DE000ETFL474)
+DE000ETFL631   # Deka S&P 500 UCITS ETF
+DE000A1CXYM9   # Weltzins-Invest (P)

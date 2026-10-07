@@ -1,0 +1,51 @@
+# MDAX – Stand 07.10.2026, Quelle: onvista.de (nach Indexüberprüfung vom 21.09.2026)
+AIXA.DE     # Aixtron
+AT1.DE      # Aroundtown
+AMV0.DE     # Aumovio
+NDA.DE      # Aurubis
+AG1.DE      # Auto1
+BC8.DE      # Bechtle
+GBF.DE      # Bilfinger
+EVD.DE      # CTS Eventim
+DHER.DE     # Delivery Hero
+LHA.DE      # Deutsche Lufthansa
+DEZ.DE      # Deutz
+DWS.DE      # DWS Group
+ELG.DE      # Elmos Semiconductor
+EVK.DE      # Evonik
+FTK.DE      # flatexDEGIRO
+FRA.DE      # Fraport
+FNTN.DE     # Freenet
+FPE3.DE     # Fuchs Vz.
+HLE.DE      # Hella
+HAG.DE      # Hensoldt
+IOS.DE      # IONOS
+JEN.DE      # Jenoptik
+SDF.DE      # K+S
+KGX.DE      # Kion Group
+KBX.DE      # Knorr-Bremse
+KRN.DE      # Krones
+LXS.DE      # Lanxess
+LEG.DE      # LEG Immobilien
+NEM.DE      # Nemetschek
+NDX1.DE     # Nordex
+P911.DE     # Porsche AG Vz.
+PAH3.DE     # Porsche Automobil Holding
+PUM.DE      # Puma
+RAA.DE      # Rational
+R3NK.DE     # RENK Group
+RRTL.DE     # RTL Group
+SZG.DE      # Salzgitter
+SRT3.DE     # Sartorius Vz.
+SHA0.DE     # Schaeffler
+WAF.DE      # Siltronic
+SAX.DE      # Ströer
+SMHN.DE     # SUSS MicroTec
+TEG.DE      # TAG Immobilien
+TLX.DE      # Talanx
+TKA.DE      # Thyssenkrupp
+TKMS.DE     # TKMS
+8TRA.DE     # Traton
+TUI1.DE     # TUI
+UTDI.DE     # United Internet
+WCH.DE      # Wacker Chemie

@@ -1,0 +1,50 @@
+# Global Challenges Index (GCX) – Stand 07.10.2026, Quelle: GCX-Factbook Börse Hannover 01/2026
+CVSA        # Covista (ehem. Adtalem Global Education, Ticker bis Feb. 2026 ATGE)
+NDA.DE      # Aurubis
+BFSA.DE     # Befesa
+BILL.ST     # Billerud (ehem. BillerudKorsnäs)
+BIM.PA      # bioMérieux
+CWT         # California Water Service
+CNR.TO      # Canadian National Railway
+COLO-B.CO   # Coloplast B
+CTEC.L      # ConvaTec
+CSX         # CSX
+DSY.PA      # Dassault Systèmes
+EDPR.LS     # EDP Renováveis
+FABG.ST     # Fabege
+FSLR        # First Solar
+FGP.L       # FirstGroup
+FME.DE      # Fresenius Medical Care
+GEBN.SW     # Geberit
+GFC.PA      # Gecina
+GEN         # Gen Digital
+HASI        # HA Sustainable Infrastructure (Hannon Armstrong)
+HNR1.DE     # Hannover Rück
+HEN3.DE     # Henkel Vz
+INTC        # Intel
+TILE        # Interface
+4902.T      # Konica Minolta
+6370.T      # Kurita Water
+LNZ.VI      # Lenzing
+MDT         # Medtronic
+MLKN        # MillerKnoll (ehem. Herman Miller)
+MNDI.L      # Mondi
+NDX1.DE     # Nordex
+ORA         # Ormat Technologies
+ORSTED.CO   # Ørsted
+PSON.L      # Pearson
+PNN.L       # Pennon Group
+7752.T      # Ricoh
+ROCK-B.CO   # Rockwool B
+SCATC.OL    # Scatec
+SVT.L       # Severn Trent
+SHL.DE      # Siemens Healthineers
+LIGHT.AS    # Signify
+SN.L        # Smith & Nephew
+SLR.MC      # Solaria Energía
+SOON.SW     # Sonova
+STMPA.PA    # STMicroelectronics
+SREN.SW     # Swiss Re
+UNP         # Union Pacific
+UU.L        # United Utilities
+XRX         # Xerox

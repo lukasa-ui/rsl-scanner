@@ -1,0 +1,51 @@
+# SDAX – Stand 07.10.2026, Quelle: onvista.de (nach Indexüberprüfung vom 21.09.2026; der SDAX hat seit der Regeländerung 50 Werte)
+1U1.DE      # 1&1
+ADV.DE      # Adtran Networks
+ACT.DE      # Alzchem Group
+1AST.DE     # ASTA Energy Solutions
+AOF.DE      # ATOSS Software
+BSL.DE      # Basler
+BFSA.DE     # Befesa
+COK.DE      # Cancom
+AFX.DE      # Carl Zeiss Meditec
+CWC.DE      # CEWE
+DMP.DE      # Dermapharm
+DBAN.DE     # Deutsche Beteiligungs AG
+DEQ.DE      # Deutsche Euroshop
+PBB.DE      # Deutsche Pfandbriefbank
+DOU.DE      # Douglas
+DRW3.DE     # Drägerwerk Vz.
+DUE.DE      # Dürr
+EUZ.DE      # Eckert & Ziegler
+EIN3.DE     # Einhell Vz.
+EKT.DE      # Energiekontor
+EVT.DE      # Evotec
+FIE.DE      # Fielmann
+VH2.DE      # Friedrich Vorwerk
+GFT.DE      # GFT Technologies
+GYC.DE      # Grand City Properties
+GLJ.DE      # grenke
+HABA.DE     # Hamborner REIT
+HDD.DE      # Heidelberger Druckmaschinen
+HFG.DE      # HelloFresh
+HBH.DE      # Hornbach Holding
+BOSS.DE     # Hugo Boss
+HYQ.DE      # Hypoport
+INH.DE      # INDUS Holding
+IXX.DE      # INIT
+JST.DE      # JOST Werke
+JUN3.DE     # Jungheinrich Vz.
+SANT.DE     # Kontron
+KSB3.DE     # KSB Vz.
+KWS.DE      # KWS Saat
+LPK.DE      # LPKF Laser
+MBB.DE      # MBB
+ILM1.DE     # Medios
+MLP.DE      # MLP
+MUX.DE      # Mutares
+NA9.DE      # Nagarro
+NOEJ.DE     # NORMA Group
+OHB.DE      # OHB
+OBCK.DE     # Ottobock
+PAT.DE      # Patrizia
+PNE3.DE     # PNE

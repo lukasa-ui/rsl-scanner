@@ -1,0 +1,31 @@
+# TecDAX – Stand 07.10.2026, Quelle: onvista.de (nach Indexüberprüfung vom 21.09.2026)
+AIXA.DE     # Aixtron
+AOF.DE      # ATOSS Software
+BC8.DE      # Bechtle
+AFX.DE      # Carl Zeiss Meditec
+DTE.DE      # Deutsche Telekom
+DRW3.DE     # Drägerwerk Vz.
+EUZ.DE      # Eckert & Ziegler
+ELG.DE      # Elmos Semiconductor
+EVT.DE      # Evotec
+FNTN.DE     # Freenet
+HAG.DE      # Hensoldt
+IFX.DE      # Infineon
+IOS.DE      # IONOS
+JEN.DE      # Jenoptik
+SANT.DE     # Kontron
+NEM.DE      # Nemetschek
+NDX1.DE     # Nordex
+OHB.DE      # OHB
+OBCK.DE     # Ottobock
+TPE.DE      # PVA TePla
+QIA.DE      # Qiagen
+SAP.DE      # SAP
+SRT3.DE     # Sartorius Vz.
+SHL.DE      # Siemens Healthineers
+WAF.DE      # Siltronic
+S92.DE      # SMA Solar
+SMHN.DE     # SUSS MicroTec
+TMV.DE      # TeamViewer
+UTDI.DE     # United Internet
+VBK.DE      # Verbio

@@ -1,0 +1,21 @@
+# ATX – Stand 07.10.2026, Quelle: Wikipedia (Stand der Tabelle April 2026)
+EBS.VI      # Erste Group
+VER.VI      # Verbund
+OMV.VI      # OMV
+BG.VI       # BAWAG
+ANDR.VI     # Andritz
+WIE.VI      # Wienerberger
+VOE.VI      # voestalpine
+RBI.VI      # Raiffeisen Bank International
+POS.VI      # Porr
+CAI.VI      # CA Immo
+EVN.VI      # EVN
+ATS.VI      # AT&S
+POST.VI     # Österreichische Post
+VIG.VI      # Vienna Insurance Group
+LNZ.VI      # Lenzing
+UQA.VI      # Uniqa
+SBO.VI      # Schoeller-Bleckmann
+IIA.VI      # Immofinanz
+STR.VI      # Strabag
+DOC.VI      # DO & CO

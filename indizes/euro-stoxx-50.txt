@@ -1,0 +1,51 @@
+# Euro Stoxx 50 – Stand 07.10.2026, Quelle: onvista.de
+ADS.DE      # adidas
+ADYEN.AS    # Adyen
+AIR.PA      # Airbus
+AI.PA       # Air Liquide
+ALV.DE      # Allianz
+ABI.BR      # Anheuser-Busch InBev
+ARGX.BR     # argenx
+ASML.AS     # ASML
+CS.PA       # AXA
+BBVA.MC     # BBVA
+BAS.DE      # BASF
+BAYN.DE     # Bayer
+BMW.DE      # BMW
+BNP.PA      # BNP Paribas
+BN.PA       # Danone
+DBK.DE      # Deutsche Bank
+DB1.DE      # Deutsche Börse
+DHL.DE      # Deutsche Post (DHL)
+DTE.DE      # Deutsche Telekom
+ENEL.MI     # Enel
+ENGI.PA     # Engie
+ENI.MI      # Eni
+EL.PA       # EssilorLuxottica
+RACE.MI     # Ferrari
+RMS.PA      # Hermès
+IBE.MC      # Iberdrola
+ITX.MC      # Inditex
+IFX.DE      # Infineon
+INGA.AS     # ING Groep
+ISP.MI      # Intesa Sanpaolo
+AD.AS       # Ahold Delhaize
+OR.PA       # L'Oréal
+MC.PA       # LVMH
+MBG.DE      # Mercedes-Benz Group
+MUV2.DE     # Münchener Rück
+NOKIA.HE    # Nokia
+NDA-FI.HE   # Nordea
+PRX.AS      # Prosus
+RHM.DE      # Rheinmetall
+SAF.PA      # Safran
+SGO.PA      # Saint-Gobain
+SAN.PA      # Sanofi
+SAN.MC      # Banco Santander
+SAP.DE      # SAP
+SU.PA       # Schneider Electric
+SIE.DE      # Siemens
+ENR.DE      # Siemens Energy
+TTE.PA      # TotalEnergies
+UCG.MI      # UniCredit
+DG.PA       # Vinci
