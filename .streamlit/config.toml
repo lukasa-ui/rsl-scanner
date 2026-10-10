@@ -1,18 +1,18 @@
 [theme]
 base = "light"
-primaryColor = "#0F6B4F"
-backgroundColor = "#FFFFFF"
-secondaryBackgroundColor = "#F1F5F3"
-textColor = "#1C2724"
-borderColor = "#DCE5E0"
-linkColor = "#0F6B4F"
-dataframeHeaderBackgroundColor = "#F1F5F3"
-baseRadius = "small"
+primaryColor = "#0071E3"
+backgroundColor = "#F5F5F7"
+secondaryBackgroundColor = "#F5F5F7"
+textColor = "#1D1D1F"
+borderColor = "#D2D2D7"
+linkColor = "#0066CC"
+dataframeHeaderBackgroundColor = "#FAFAFC"
+baseRadius = "medium"
 showWidgetBorder = true
-font = "Barlow:https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600&display=swap, sans-serif"
-headingFont = "Barlow Semi Condensed:https://fonts.googleapis.com/css2?family=Barlow+Semi+Condensed:wght@500;600&display=swap, sans-serif"
-headingFontWeights = [600, 600, 600, 500, 500, 500]
-chartCategoricalColors = ["#1C2724", "#0F6B4F"]
+font = "Inter:https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap, sans-serif"
+headingFont = "Inter:https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap, sans-serif"
+headingFontWeights = [700, 600, 600, 600, 600, 600]
+chartCategoricalColors = ["#1D1D1F", "#0071E3"]
 
 [client]
 toolbarMode = "minimal"
