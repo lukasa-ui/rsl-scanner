@@ -1,0 +1,29 @@
+name: RSL-Wochenmail
+
+on:
+  schedule:
+    # Freitags gegen 13 Uhr deutscher Zeit. GitHub rechnet in UTC, daher zwei Zeilen:
+    - cron: "50 10 * * 5"   # 12:50 Uhr Sommerzeit
+    - cron: "50 11 * * 5"   # 12:50 Uhr Winterzeit
+  workflow_dispatch:
+
+jobs:
+  wochenmail:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Pakete installieren
+        run: pip install yfinance curl_cffi pandas lxml requests openpyxl
+      - name: Bericht erstellen und versenden
+        env:
+          ZEITPLAN: ${{ github.event.schedule }}
+          SMTP_SERVER: ${{ secrets.SMTP_SERVER }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_BENUTZER: ${{ secrets.SMTP_BENUTZER }}
+          SMTP_PASSWORT: ${{ secrets.SMTP_PASSWORT }}
+          EMAIL_AN: ${{ secrets.EMAIL_AN }}
+        run: python wochenmail.py
