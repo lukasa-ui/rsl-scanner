@@ -22,24 +22,32 @@ st.set_page_config(page_title="RSL-Scanner", page_icon="📈", layout="wide")
 
 LISTEN_ORDNER = Path(__file__).parent / "listen"
 
-# Indizes: name -> (Wikipedia-URL für die aktuelle Zusammensetzung oder None, Endung für Yahoo, Mindestanzahl)
-# Bei None wird nur die hinterlegte Liste im Ordner "indizes" verwendet (Wikipedia ist dort veraltet).
-# Bei einer URL wird Wikipedia gelesen; klappt das nicht, greift ebenfalls die hinterlegte Liste.
+WIKI = "https://en.wikipedia.org/wiki/"
+GITHUB_SP500 = "https://raw.githubusercontent.com/datasets/s-and-p-500-companies/main/data/constituents.csv"
+NASDAQ_API = "https://api.nasdaq.com/api/quote/list-type/nasdaq100"
+
+# Indizes in der Reihenfolge der Auswahlliste (nach Bedeutung/Beliebtheit).
+# "quellen": Live-Quellen, die der Reihe nach probiert werden. Klappt keine, wird die hinterlegte Liste
+# im Ordner "indizes" verwendet (und ein Hinweis angezeigt). Ohne Live-Quelle gilt nur die hinterlegte Liste.
 INDIZES = {
-    "DAX": (None, ".DE", 0),
-    "MDAX": (None, ".DE", 0),
-    "SDAX": (None, ".DE", 0),
-    "TecDAX": (None, ".DE", 0),
-    "Euro Stoxx 50": (None, "", 0),
-    "Dow Jones": ("https://en.wikipedia.org/wiki/List_of_Dow_Jones_Industrial_Average_companies", "", 25),
-    "Nasdaq-100": ("https://en.wikipedia.org/wiki/Nasdaq-100", "", 90),
-    "Global Challenges Index": (None, "", 0),
-    "FTSE MIB": ("https://en.wikipedia.org/wiki/FTSE_MIB", ".MI", 35),
-    "ATX": (None, ".VI", 0),
-    "LuxX": (None, "", 0),
-    "S&P 500": ("https://en.wikipedia.org/wiki/List_of_S%26P_500_companies", "", 400),
+    "S&P 500": {"quellen": [("csv", GITHUB_SP500), ("wiki", WIKI + "List_of_S%26P_500_companies")],
+                "endung": "", "minimum": 450},
+    "Nasdaq-100": {"quellen": [("nasdaq", NASDAQ_API), ("wiki", WIKI + "Nasdaq-100")],
+                   "endung": "", "minimum": 90},
+    "Dow Jones": {"quellen": [("wiki", WIKI + "List_of_Dow_Jones_Industrial_Average_companies")],
+                  "endung": "", "minimum": 28},
+    "DAX": {"quellen": [], "endung": ".DE", "minimum": 0},
+    "Euro Stoxx 50": {"quellen": [], "endung": "", "minimum": 0},
+    "MDAX": {"quellen": [], "endung": ".DE", "minimum": 0},
+    "TecDAX": {"quellen": [], "endung": ".DE", "minimum": 0},
+    "SDAX": {"quellen": [], "endung": ".DE", "minimum": 0},
+    "FTSE MIB": {"quellen": [("wiki", WIKI + "FTSE_MIB")], "endung": ".MI", "minimum": 35},
+    "ATX": {"quellen": [], "endung": ".VI", "minimum": 0},
+    "Global Challenges Index": {"quellen": [], "endung": "", "minimum": 0},
+    "LuxX": {"quellen": [], "endung": "", "minimum": 0},
 }
-ALLE = "Planspiel Börse (alle Werte)"   # alle Indizes außer S&P 500 + alle eigenen Listen
+QUELLEN_NAME = {"csv": "GitHub (datasets/s-and-p-500-companies)", "nasdaq": "nasdaq.com", "wiki": "Wikipedia"}
+ALLE = "Planspiel Börse"   # alle Indizes außer S&P 500 + alle eigenen Listen
 
 
 # ------------------------------------------------------------------ Listen & Ticker
@@ -122,11 +130,28 @@ def _finde_spalte(namen: list[str], gesucht: tuple[str, ...]) -> int | None:
     return None
 
 
+def _ist_aenderungstabelle(tab: pd.DataFrame) -> bool:
+    """Tabelle der Indexänderungen (Kopf »Added | Removed«) erkennen – nicht verwechseln mit
+    einer normalen Spalte wie »Date added« in der S&P-500-Tabelle."""
+    if not isinstance(tab.columns, pd.MultiIndex):
+        return False
+    oben = " ".join(str(c).lower() for c in tab.columns.get_level_values(0))
+    return "added" in oben or "removed" in oben
+
+
+def _yahoo_ticker(t: str, endung: str) -> str:
+    t = re.sub(r"\[.*?\]", "", str(t)).strip().split()[0].upper()
+    if endung and "." not in t:
+        return t + endung
+    if not endung:
+        return t.replace(".", "-").replace("/", "-")      # Yahoo schreibt BRK-B statt BRK.B
+    return t
+
+
 def tickertabelle_aus_html(html: str, endung: str, minimum: int) -> dict[str, str]:
     gefunden = []
     for tab in pd.read_html(io.StringIO(html)):
-        alle = " ".join(str(c).lower() for c in tab.columns)
-        if "added" in alle or "removed" in alle:          # Tabelle der Indexänderungen überspringen
+        if _ist_aenderungstabelle(tab):
             continue
         namen = [_spaltenname(c) for c in tab.columns]
         daten = tab
@@ -135,59 +160,103 @@ def tickertabelle_aus_html(html: str, endung: str, minimum: int) -> dict[str, st
             erste = [_spaltenname(v) for v in tab.iloc[0]]
             if _finde_spalte(erste, ("ticker", "symbol")) is not None:
                 namen, daten = erste, tab.iloc[1:]
-        gefunden.append(", ".join(namen[:5]))
+        gefunden.append(", ".join(namen[:4]))
         ti = _finde_spalte(namen, ("ticker", "symbol"))
         ni = _finde_spalte(namen, ("company", "security", "name", "unternehmen"))
         if ti is None or len(daten) < minimum:
             continue
         ergebnis = {}
         for _, zeile in daten.iterrows():
-            t = re.sub(r"\[.*?\]", "", str(zeile.iloc[ti])).strip()
-            if not t or t.lower() == "nan":
-                continue
-            t = t.split()[0].upper()
-            if endung and "." not in t:
-                t += endung
-            elif not endung:
-                t = t.replace(".", "-")          # Yahoo schreibt BRK-B statt BRK.B
-            ergebnis[t] = str(zeile.iloc[ni]) if ni is not None else ""
+            roh = str(zeile.iloc[ti]).strip()
+            if roh and roh.lower() != "nan":
+                ergebnis[_yahoo_ticker(roh, endung)] = str(zeile.iloc[ni]) if ni is not None else ""
         if len(ergebnis) >= minimum:
             return ergebnis
-    raise RuntimeError("Keine passende Tabelle gefunden. Gefundene Tabellen: "
-                       + " | ".join(gefunden[:8]))
+    raise RuntimeError("keine passende Tabelle (gefunden: " + " | ".join(gefunden[:6]) + ")")
+
+
+def tickertabelle_aus_csv(text: str, endung: str) -> dict[str, str]:
+    tab = pd.read_csv(io.StringIO(text))
+    namen = [_spaltenname(c) for c in tab.columns]
+    ti = _finde_spalte(namen, ("symbol", "ticker"))
+    ni = _finde_spalte(namen, ("security", "name", "company"))
+    if ti is None:
+        raise RuntimeError("CSV ohne Symbol-Spalte")
+    return {_yahoo_ticker(z.iloc[ti], endung): (str(z.iloc[ni]) if ni is not None else "")
+            for _, z in tab.iterrows() if str(z.iloc[ti]).strip() not in ("", "nan")}
+
+
+def _symbolzeilen(obj):
+    """Sucht in verschachteltem JSON die Liste von Einträgen mit »symbol«."""
+    if isinstance(obj, list) and obj and isinstance(obj[0], dict) and "symbol" in obj[0]:
+        return obj
+    if isinstance(obj, dict):
+        for v in obj.values():
+            r = _symbolzeilen(v)
+            if r:
+                return r
+    return None
+
+
+def tickertabelle_aus_nasdaq(daten: dict, endung: str) -> dict[str, str]:
+    zeilen = _symbolzeilen(daten) or []
+    return {_yahoo_ticker(z["symbol"], endung): z.get("companyName") or z.get("name") or ""
+            for z in zeilen if z.get("symbol")}
+
+
+BROWSER_KOPF = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) "
+                  "Chrome/128.0 Safari/537.36",
+    "Accept": "text/html,application/json,text/csv;q=0.9,*/*;q=0.8",
+    "Accept-Language": "de-DE,de;q=0.9,en;q=0.8",
+}
+
+
+def hole_live(art: str, url: str, endung: str, minimum: int) -> dict[str, str]:
+    import requests
+
+    kopf = dict(BROWSER_KOPF)
+    if art == "nasdaq":
+        kopf.update({"Accept": "application/json, text/plain, */*",
+                     "Origin": "https://www.nasdaq.com", "Referer": "https://www.nasdaq.com/"})
+    antwort = requests.get(url, headers=kopf, timeout=30)
+    antwort.raise_for_status()
+    if art == "csv":
+        ergebnis = tickertabelle_aus_csv(antwort.text, endung)
+    elif art == "nasdaq":
+        ergebnis = tickertabelle_aus_nasdaq(antwort.json(), endung)
+    else:
+        ergebnis = tickertabelle_aus_html(antwort.text, endung, minimum)
+    if len(ergebnis) < minimum:
+        raise RuntimeError(f"nur {len(ergebnis)} Werte erhalten")
+    return ergebnis
 
 
 def ersatzliste(name: str) -> Path:
     return ERSATZ_ORDNER / (re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-") + ".txt")
 
 
-@st.cache_data(ttl=24 * 3600, show_spinner=False)
-def lade_index(name: str) -> tuple[dict[str, str], str]:
-    """Aktuelle Zusammensetzung von Wikipedia; bei Problemen die mitgelieferte Ersatzliste.
-    Gibt (Ticker->Name, Hinweis) zurück; Hinweis ist leer, wenn Wikipedia geklappt hat."""
-    import requests
-
-    url, endung, minimum = INDIZES[name]
-    if url is None:
-        datei = ersatzliste(name)
-        if not datei.exists():
-            raise RuntimeError(f"Liste {datei.name} fehlt im Ordner »indizes«.")
-        return lese_tickertext(datei.read_text(encoding="utf-8")), ""
-    try:
-        antwort = requests.get(url, timeout=30, headers={
-            "User-Agent": "RSL-Scanner/1.0 (private Aktien-App; github.com/lukasa-ui/rsl-scanner) "
-                          "python-requests"})
-        antwort.raise_for_status()
-        return tickertabelle_aus_html(antwort.text, endung, minimum), ""
-    except Exception as e:
-        datei = ersatzliste(name)
-        if datei.exists():
-            text = datei.read_text(encoding="utf-8")
-            stand = re.search(r"Stand ([0-9.]+)", text)
-            return lese_tickertext(text), (
-                f"{name}: aktuelle Zusammensetzung bei Wikipedia gerade nicht abrufbar. "
-                f"Verwende hinterlegte Liste{' vom ' + stand.group(1) if stand else ''}.")
-        raise RuntimeError(f"Zusammensetzung nicht abrufbar: {e}")
+@st.cache_data(ttl=12 * 3600, show_spinner=False)
+def lade_index(name: str) -> tuple[dict[str, str], str, bool]:
+    """Gibt (Ticker->Name, Herkunft, ist_live) zurück. Probiert die Live-Quellen der Reihe nach,
+    sonst die hinterlegte Liste."""
+    cfg = INDIZES[name]
+    fehler = []
+    for art, url in cfg["quellen"]:
+        try:
+            return hole_live(art, url, cfg["endung"], cfg["minimum"]), \
+                f"aktuell von {QUELLEN_NAME[art]}", True
+        except Exception as e:
+            fehler.append(f"{QUELLEN_NAME[art]}: {type(e).__name__} {str(e)[:120]}")
+    datei = ersatzliste(name)
+    if not datei.exists():
+        raise RuntimeError("keine Quelle erreichbar – " + "; ".join(fehler))
+    text = datei.read_text(encoding="utf-8")
+    stand = re.search(r"Stand ([0-9.]+)", text)
+    herkunft = f"hinterlegte Liste{' vom ' + stand.group(1) if stand else ''}"
+    if fehler:
+        herkunft += " – Live-Abruf fehlgeschlagen (" + "; ".join(fehler) + ")"
+    return lese_tickertext(text), herkunft, not cfg["quellen"]
 
 
 # ------------------------------------------------------------------ Kurse & RSL
@@ -305,10 +374,12 @@ tab_scan, tab_einzel, tab_hilfe = st.tabs(["Scan", "Einzelwert / Suche", "Hilfe"
 # ---------------- Scan
 with tab_scan:
     listen = eigene_listen()
-    optionen = list(listen) + list(INDIZES) + [ALLE]
+    erste = [l for l in listen if l == "Meine Liste"]
+    weitere = [l for l in listen if l != "Meine Liste"]
+    optionen = erste + [ALLE] + list(INDIZES) + weitere
     auswahl = st.multiselect(
         "Was soll gescannt werden?", optionen,
-        default=optionen[:1] if listen else [],
+        default=erste or optionen[:1],
         help="Eigene Listen (Ordner »listen«) und Indizes – mehrere kombinierbar.")
     zusatz = st.text_area(
         "Weitere Ticker (optional)", height=80,
@@ -336,6 +407,7 @@ with tab_scan:
 
     if starten:
         namen: dict[str, str] = {}
+        herkunft_liste: list[tuple[str, int, str, bool]] = []
         quellen = list(auswahl)
         if ALLE in quellen:
             quellen.remove(ALLE)
@@ -347,9 +419,8 @@ with tab_scan:
                     neu = lese_tickertext(listen[quelle].read_text(encoding="utf-8"))
                 else:
                     with st.spinner(f"Lese Zusammensetzung {quelle} …"):
-                        neu, hinweis = lade_index(quelle)
-                    if hinweis:
-                        st.info(hinweis)
+                        neu, herkunft, ok = lade_index(quelle)
+                    herkunft_liste.append((quelle, len(neu), herkunft, ok))
                 for t, name in neu.items():
                     namen.setdefault(t, name)
             except Exception as e:
@@ -382,6 +453,7 @@ with tab_scan:
                 st.session_state["ergebnis"] = {
                     "df": df, "fehlend": sorted(set(fehlend)), "n": int(n), "modus": modus,
                     "zeit": dt.datetime.now().strftime("%d.%m.%Y %H:%M"), "quellen": auswahl,
+                    "herkunft": herkunft_liste,
                 }
 
     erg = st.session_state.get("ergebnis")
@@ -397,6 +469,11 @@ with tab_scan:
         zeige_tabelle(anzeige)
         st.caption(f"Abgerufen: {erg['zeit']} · Kurse in Landeswährung der jeweiligen Börse · "
                    "⚠️ = seit über 10 Tagen kein neuer Kurs")
+        for quelle, anzahl, herkunft, ok in erg.get("herkunft", []):
+            if ok:
+                st.caption(f"{quelle}: {anzahl} Werte – {herkunft}")
+            else:
+                st.warning(f"{quelle}: {anzahl} Werte – {herkunft}")
         if erg["fehlend"]:
             st.warning(f"Ohne ausreichende Kursdaten ({len(erg['fehlend'])}): " + ", ".join(erg["fehlend"])
                        + "\n\nTipp: im Reiter »Einzelwert / Suche« den richtigen Ticker suchen.")
@@ -478,15 +555,18 @@ Name hinter `#`). ISINs übersetzt die App selbst in Yahoo-Ticker.
 Neue Liste: auf GitHub im Ordner `listen` → *Add file → Create new file* → z. B. `dividenden.txt`.
 Nach dem Speichern erscheint sie nach kurzer Zeit hier in der Auswahl.
 
-**Planspiel Börse (alle Werte)**  
+**Planspiel Börse**  
 Alle Indizes außer S&P 500 plus alle eigenen Listen – doppelte Werte zählen nur einmal.
 
-**Indizes**  
-DAX, MDAX, SDAX, TecDAX, Euro Stoxx 50, Global Challenges Index, ATX und LuxX kommen aus hinterlegten
-Listen im Ordner `indizes` (Stand steht in der jeweiligen Datei). Nach einer Indexänderung die Datei auf GitHub
-anpassen. Die DAX-Familie wird vierteljährlich überprüft (März, Juni, September, Dezember).
-Dow Jones, Nasdaq-100, FTSE MIB und S&P 500 werden bei jedem Scan aktuell von Wikipedia gelesen;
-klappt das nicht, wird die hinterlegte Liste verwendet.
+**Indizes – woher die Zusammensetzung kommt**  
+- S&P 500: aktuell von GitHub (datasets/s-and-p-500-companies), sonst Wikipedia  
+- Nasdaq-100: aktuell von nasdaq.com, sonst Wikipedia  
+- Dow Jones, FTSE MIB: aktuell von Wikipedia  
+- DAX, MDAX, SDAX, TecDAX, Euro Stoxx 50, ATX, Global Challenges Index, LuxX: hinterlegte Listen im Ordner
+  `indizes` (Stand steht in der Datei). Die DAX-Familie wird im März, Juni, September und Dezember überprüft.  
+
+Unter jeder Rangliste steht, woher die Zusammensetzung stammt. Ist eine Live-Quelle nicht erreichbar,
+wird die hinterlegte Liste verwendet und ein gelber Hinweis angezeigt.
 
 **Kurse**
 Kommen von Yahoo Finance und werden 1 Stunde zwischengespeichert. Meldet Yahoo »zu viele Anfragen«,
