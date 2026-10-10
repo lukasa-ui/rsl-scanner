@@ -1,0 +1,4 @@
+# Mein Depot (Planspiel Börse)
+# Ein Ticker oder eine ISIN pro Zeile, Name hinter #. Beispiele (zum Aktivieren das # am Zeilenanfang löschen):
+# SAP.DE        # SAP
+# DE0007164600  # SAP (als ISIN)

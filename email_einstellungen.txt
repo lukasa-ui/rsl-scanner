@@ -1,0 +1,30 @@
+# Einstellungen für die Freitags-E-Mail
+# -------------------------------------
+# Jede Zeile »scan = …« wird ein eigener Abschnitt (eigene Rangliste) in der E-Mail.
+# Mehrere Listen/Indizes in EINER Zeile mit Komma trennen – dann werden sie zu einer Rangliste kombiniert.
+#
+# Mögliche Namen: Meine Liste, Planspiel Börse, S&P 500, Nasdaq-100, Dow Jones, DAX, Euro Stoxx 50,
+#                 MDAX, TecDAX, SDAX, FTSE MIB, ATX, Global Challenges Index, LuxX, Deka Fonds
+#                 (und jede weitere Liste aus dem Ordner »listen«)
+#
+# Zeile ausschalten: ein # an den Anfang setzen.
+
+scan = Planspiel Börse
+scan = Meine Liste
+# scan = S&P 500
+# scan = DAX, MDAX
+
+# Grün markiert werden die besten … Prozent (gleichzeitig Grenze für »Verkaufen« im Depot)
+top_prozent = 30
+
+# So viele Werte stehen pro Abschnitt in der E-Mail (die vollständige Liste hängt als Excel an)
+anzahl = 30
+
+# Wochen für die RSL
+wochen = 26
+
+# Link zur App (erscheint unten in der E-Mail)
+app_link = https://rsl-lukas.streamlit.app
+
+# E-Mail an/aus: ja oder nein
+aktiv = ja
