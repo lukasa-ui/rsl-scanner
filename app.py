@@ -182,7 +182,7 @@ def details_fenster(ticker, name, tageskurse, n, zeile):
 
 st.html(f"""<div class="rsl-kopf"><h1>RSL-Scanner</h1>
 <p>Relative Stärke nach Levy für dein Planspiel Börse</p></div>""")
-tab_scan, tab_einzel, tab_hilfe = st.tabs(["Rangliste", "Aktie suchen", "Hilfe"])
+tab_scan, tab_einzel, tab_mail, tab_hilfe = st.tabs(["Rangliste", "Aktie suchen", "E-Mail", "Hilfe"])
 listen = k.eigene_listen()
 
 # ---------------- Rangliste
@@ -335,6 +335,169 @@ with tab_einzel:
             st.caption("Zeile für deine Liste oder dein Depot:")
             st.code(f"{symbol:<12}# {name}", language=None)
 
+# ---------------- E-Mail
+def geheimnis(name: str, standard=None):
+    """Wert aus den Streamlit-Secrets (App-Einstellungen bei share.streamlit.io)."""
+    try:
+        return st.secrets.get(name, standard)
+    except Exception:
+        return standard
+
+
+def naechster_freitag() -> str:
+    heute = dt.date.today()
+    tage = (4 - heute.weekday()) % 7
+    if tage == 0 and dt.datetime.now().hour >= 13:
+        tage = 7
+    return (heute + dt.timedelta(days=tage)).strftime("%d.%m.")
+
+
+STATUS_TEXT = {"queued": "wartet", "in_progress": "läuft gerade", "waiting": "wartet", "pending": "wartet"}
+ERGEBNIS_TEXT = {"success": "✓ verschickt", "failure": "✗ Fehler", "cancelled": "abgebrochen", "skipped": "übersprungen"}
+
+with tab_mail:
+    import github_verbindung as ghv
+    import wochenmail as wm
+
+    token, pin = geheimnis("GITHUB_TOKEN"), geheimnis("APP_PIN")
+    projekt = geheimnis("GITHUB_PROJEKT", "lukasa-ui/rsl-scanner")
+
+    if not token or not pin:
+        st.markdown(
+            "Hier stellst du die Freitags-E-Mail ein: welche Listen drin sind und an welche Adresse sie geht. "
+            "Dafür braucht die App einmalig einen Schlüssel zu deinem GitHub-Projekt und eine PIN, "
+            "damit niemand sonst deine Einstellungen ändern kann.")
+        st.markdown(
+            "1. Bei GitHub einen Schlüssel erzeugen: **Settings → Developer settings → Personal access tokens → "
+            "Fine-grained tokens → Generate new token**. Zugriff nur auf *rsl-scanner*, Berechtigungen "
+            "*Actions, Contents, Secrets, Workflows* jeweils auf **Read and write**.\n"
+            "2. Bei share.streamlit.io neben der App **⋮ → Settings → Secrets** öffnen und eintragen:")
+        st.code('GITHUB_TOKEN = "github_pat_…"\nAPP_PIN = "deine PIN"', language="toml")
+        st.markdown("3. Speichern – die App startet neu und dieser Bereich wird freigeschaltet.")
+    elif not st.session_state.get("mail_frei"):
+        st.write("Gib deine PIN ein, um die E-Mail-Einstellungen zu öffnen.")
+        eingabe = st.text_input("PIN", type="password", key="pin_eingabe")
+        if st.button("Entsperren"):
+            if eingabe == str(pin):
+                st.session_state["mail_frei"] = True
+                st.rerun()
+            else:
+                st.error("Die PIN stimmt nicht.")
+    else:
+        gh = ghv.GitHub(token, projekt)
+        stand = None
+        try:
+            if "mail_stand" not in st.session_state:
+                with st.spinner("Lade die aktuellen Einstellungen von GitHub …"):
+                    text, _ = gh.lies_datei("email_einstellungen.txt")
+                    st.session_state["mail_stand"] = {
+                        "cfg": wm.einstellungen_aus_text(text or ""),
+                        "secrets": gh.vorhandene_secrets(),
+                        "zeitplan": gh.zeitplan_vorhanden(),
+                    }
+            stand = st.session_state["mail_stand"]
+        except Exception as e:
+            st.error(f"GitHub ist nicht erreichbar: {e}")
+
+    if token and pin and st.session_state.get("mail_frei") and stand is not None:
+        cfg = stand["cfg"]
+        zugang_ok = all(n in stand["secrets"] for n in ghv.SECRET_NAMEN)
+        inhalt_ok = bool(cfg["scan"])
+        haken = lambda ok: "✓" if ok else "○"
+        st.markdown(
+            f"{haken(inhalt_ok)} Inhalt gewählt  \n{haken(zugang_ok)} Zugangsdaten hinterlegt  \n"
+            f"{haken(stand['zeitplan'])} Zeitplan eingerichtet")
+        if inhalt_ok and zugang_ok and stand["zeitplan"] and cfg.get("aktiv", "ja") != "nein":
+            st.success(f"Die nächste E-Mail kommt am Freitag, {naechster_freitag()}, gegen 13 Uhr.")
+
+        # ---- Inhalt
+        st.markdown("#### Was soll in der E-Mail stehen?")
+        mail_optionen = [l for l in listen if l == "Meine Liste"] + [k.ALLE] + list(k.INDIZES) + \
+                        [l for l in listen if l != "Meine Liste"]
+        gewaehlt = [n for gruppe in cfg["scan"] for n in gruppe if n in mail_optionen]
+        mail_auswahl = st.multiselect("Ranglisten (jede wird ein eigener Abschnitt und ein eigenes Excel-Blatt)",
+                                      mail_optionen, default=gewaehlt or ["Meine Liste"])
+        m1, m2 = st.columns(2)
+        mail_grenze = m1.number_input("Grün markieren: beste … %", 1, 100, int(cfg["top_prozent"]), 5, key="m_gr")
+        mail_anzahl = m2.number_input("Werte im Text der Mail (0 = alle)", 0, 2000, int(cfg["anzahl"]), 10, key="m_an",
+                                      help="Die vollständige Liste hängt immer als Excel-Datei an.")
+        mail_aktiv = st.toggle("E-Mail jeden Freitag verschicken", value=cfg.get("aktiv", "ja") != "nein")
+        if st.button("Inhalt speichern"):
+            if not mail_auswahl:
+                st.error("Wähle mindestens eine Rangliste aus.")
+            else:
+                neu = dict(cfg, scan=[[n] for n in mail_auswahl], top_prozent=float(mail_grenze),
+                           anzahl=int(mail_anzahl), aktiv="ja" if mail_aktiv else "nein")
+                try:
+                    gh.schreibe_datei("email_einstellungen.txt", wm.einstellungen_als_text(neu),
+                                      "E-Mail-Inhalt geändert (aus der App)")
+                    stand["cfg"] = neu
+                    st.success("Gespeichert. Gilt ab der nächsten E-Mail.")
+                except Exception as e:
+                    st.error(f"Speichern fehlgeschlagen: {e}")
+
+        # ---- Versand
+        st.markdown("#### Über welches E-Mail-Konto wird verschickt?")
+        if zugang_ok:
+            st.caption("Zugangsdaten sind hinterlegt. Zum Ändern einfach neu eintragen und speichern.")
+        anbieter = st.selectbox("Anbieter", list(ghv.ANBIETER))
+        server, port, hinweis = ghv.ANBIETER[anbieter]
+        if anbieter == "Anderer Anbieter":
+            v1, v2 = st.columns([3, 1])
+            server = v1.text_input("SMTP-Server", placeholder="z. B. smtp.example.de")
+            port = int(v2.number_input("Port", 1, 65535, 587))
+        st.caption(hinweis)
+        adresse = st.text_input("Deine E-Mail-Adresse (Absender)")
+        passwort = st.text_input("Passwort", type="password",
+                                 help="Wird verschlüsselt bei GitHub gespeichert und ist danach nicht mehr lesbar.")
+        empfaenger = st.text_input("Empfänger (leer = an dich selbst)",
+                                   help="Mehrere Adressen mit Komma trennen.")
+        if st.button("Zugangsdaten speichern"):
+            if not (server and adresse and passwort):
+                st.error("Bitte Anbieter, E-Mail-Adresse und Passwort ausfüllen.")
+            else:
+                try:
+                    gh.setze_secrets({"SMTP_SERVER": server, "SMTP_PORT": str(port), "SMTP_BENUTZER": adresse,
+                                      "SMTP_PASSWORT": passwort, "EMAIL_AN": empfaenger.strip() or adresse})
+                    stand["secrets"] = gh.vorhandene_secrets()
+                    st.success("Zugangsdaten verschlüsselt gespeichert.")
+                except Exception as e:
+                    st.error(f"Speichern fehlgeschlagen: {e}")
+
+        # ---- Zeitplan und Test
+        st.markdown("#### Zeitplan und Test")
+        if not stand["zeitplan"]:
+            st.write("Der Zeitplan (freitags gegen 13 Uhr) ist noch nicht eingerichtet.")
+            if st.button("Zeitplan einrichten"):
+                try:
+                    gh.zeitplan_einrichten()
+                    stand["zeitplan"] = True
+                    st.success("Zeitplan eingerichtet. Nach etwa einer Minute kannst du eine Testmail senden.")
+                except Exception as e:
+                    st.error(f"Einrichten fehlgeschlagen: {e}")
+        else:
+            st.write("Eingerichtet: jeden Freitag gegen 13 Uhr.")
+        if st.button("Testmail jetzt senden", disabled=not (stand["zeitplan"] and zugang_ok)):
+            try:
+                gh.jetzt_starten()
+                st.success("Gestartet. Die E-Mail kommt in etwa 3–5 Minuten.")
+            except Exception as e:
+                st.error(str(e))
+        if stand["zeitplan"]:
+            try:
+                laeufe = gh.letzte_laeufe()
+            except Exception:
+                laeufe = []
+            if laeufe:
+                st.caption("Letzte Läufe:")
+                for l in laeufe:
+                    zeit = pd.Timestamp(l["start"]).tz_convert("Europe/Berlin").strftime("%d.%m. %H:%M")
+                    status = ERGEBNIS_TEXT.get(l["ergebnis"], STATUS_TEXT.get(l["status"], l["status"]))
+                    art = "von Hand" if l["art"] == "workflow_dispatch" else "planmäßig"
+                    st.markdown(f"- {zeit} Uhr, {art}: [{status}]({l['link']})")
+            if st.button("Status aktualisieren"):
+                st.rerun()
+
 # ---------------- Hilfe
 with tab_hilfe:
     st.markdown("""
@@ -354,7 +517,7 @@ Die laufende Woche zählt mit dem aktuellsten Kurs. Kurse sind um Dividenden und
 #### Dateien im GitHub-Projekt
 - `depot.txt` – deine Positionen, ein Ticker oder eine ISIN pro Zeile, Name hinter `#`
 - `listen/` – eigene Listen, z. B. `listen/beobachtung.txt` (erscheint dann in der Auswahl)
-- `email_einstellungen.txt` – welche Listen die Freitags-E-Mail enthält
+- `email_einstellungen.txt` – Inhalt der Freitags-E-Mail (am einfachsten im Reiter »E-Mail« ändern)
 - `indizes/` – hinterlegte Indexlisten (DAX-Familie, Euro Stoxx 50, ATX, GCX, LuxX)
 
 #### Woher die Indexlisten kommen

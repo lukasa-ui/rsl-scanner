@@ -30,23 +30,56 @@ TOP_HG = "#DDEFE6"
 
 # ------------------------------------------------------------------ Einstellungen
 
+STANDARD = {"scan": [], "top_prozent": 30.0, "anzahl": 30, "wochen": 26,
+            "app_link": "https://rsl-lukas.streamlit.app", "aktiv": "ja"}
+
+
+def einstellungen_aus_text(text: str) -> dict:
+    cfg = dict(STANDARD, scan=[])
+    for zeile in text.splitlines():
+        zeile = zeile.split("#", 1)[0].strip()
+        if "=" not in zeile:
+            continue
+        schluessel, wert = (t.strip() for t in zeile.split("=", 1))
+        schluessel = schluessel.lower()
+        if schluessel == "scan":
+            cfg["scan"].append([t.strip() for t in wert.split(",") if t.strip()])
+        elif schluessel == "top_prozent":
+            cfg[schluessel] = float(wert.replace(",", "."))
+        elif schluessel in ("anzahl", "wochen"):
+            cfg[schluessel] = int(wert)
+        else:
+            cfg[schluessel] = wert
+    return cfg
+
+
+def einstellungen_als_text(cfg: dict) -> str:
+    """Schreibt die Einstellungen im Format von email_einstellungen.txt (z. B. aus der App heraus)."""
+    zeilen = [
+        "# Einstellungen für die Freitags-E-Mail (am einfachsten in der App unter »E-Mail« ändern)",
+        "# Jede Zeile »scan = …« wird eine eigene Rangliste in der E-Mail und ein eigenes Blatt in der Excel-Datei.",
+        "# Mehrere Namen in EINER Zeile mit Komma trennen = eine gemeinsame Rangliste.",
+        "",
+    ]
+    zeilen += [f"scan = {', '.join(gruppe)}" for gruppe in cfg["scan"]]
+    zeilen += [
+        "",
+        "# Grün markiert werden die besten … Prozent (gleichzeitig Grenze für »Verkaufen« im Depot)",
+        f"top_prozent = {k.de_zahl(cfg['top_prozent'], 0)}",
+        "# So viele Werte stehen pro Rangliste im Text der E-Mail (0 = alle). Die vollständige Liste hängt immer als Excel an.",
+        f"anzahl = {int(cfg['anzahl'])}",
+        f"wochen = {int(cfg['wochen'])}",
+        f"app_link = {cfg.get('app_link', '')}",
+        "# E-Mail an/aus: ja oder nein",
+        f"aktiv = {cfg.get('aktiv', 'ja')}",
+        "",
+    ]
+    return "\n".join(zeilen)
+
+
 def lies_einstellungen() -> dict:
-    cfg = {"scan": [], "top_prozent": 30.0, "anzahl": 30, "wochen": 26, "app_link": "", "aktiv": "ja"}
-    if EINSTELLUNGEN.exists():
-        for zeile in EINSTELLUNGEN.read_text(encoding="utf-8").splitlines():
-            zeile = zeile.split("#", 1)[0].strip()
-            if "=" not in zeile:
-                continue
-            schluessel, wert = (t.strip() for t in zeile.split("=", 1))
-            schluessel = schluessel.lower()
-            if schluessel == "scan":
-                cfg["scan"].append([t.strip() for t in wert.split(",") if t.strip()])
-            elif schluessel in ("top_prozent",):
-                cfg[schluessel] = float(wert.replace(",", "."))
-            elif schluessel in ("anzahl", "wochen"):
-                cfg[schluessel] = int(wert)
-            else:
-                cfg[schluessel] = wert
+    text = EINSTELLUNGEN.read_text(encoding="utf-8") if EINSTELLUNGEN.exists() else ""
+    cfg = einstellungen_aus_text(text)
     if not cfg["scan"]:
         cfg["scan"] = [[k.ALLE]]
     return cfg
@@ -175,7 +208,7 @@ def baue_html(cfg: dict, daten: dict) -> str:
                          + ", ".join(f'{html.escape(r.Ticker)} ({html.escape(_name(r.Name)[:25])}, Rang {r.Rang})'
                                      for r in neu.head(15).itertuples())
                          + (f" und {rest} weitere (siehe App)" if rest > 0 else "") + "</p>")
-        teile.append(_tabelle(df.head(cfg["anzahl"]), grenze))
+        teile.append(_tabelle(df if cfg["anzahl"] <= 0 else df.head(cfg["anzahl"]), grenze))
         hinweise = [f"{q}: {h.split(' (')[0]}" for q, _, h, ok in a["herkunft"] if not ok]
         hinweise += [f"{q}: {t}" for q, t in a["fehler"]]
         if a["fehlend"] or a["isin_fehlend"]:
