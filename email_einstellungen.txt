@@ -13,5 +13,5 @@ app_link = https://rsl-lukas.streamlit.app
 # E-Mail an/aus: ja oder nein
 aktiv = ja
 # Nur zur Anzeige in der App (das Passwort liegt verschlüsselt bei GitHub):
-versand_adresse = 
-versand_server = 
+versand_adresse = gurlitlu@gmail.com
+versand_server = smtp.gmail.com
