@@ -466,14 +466,40 @@ with tab_mail:
     if token and pin and st.session_state.get("mail_frei") and stand is not None:
         cfg = stand["cfg"]
         zugang_ok = all(n in stand["secrets"] for n in ghv.SECRET_NAMEN)
-        inhalt_ok = bool(cfg["scan"])
+        try:
+            laeufe = gh.letzte_laeufe(5) if stand["zeitplan"] else []
+        except Exception:
+            laeufe = []
+        letzter = laeufe[0] if laeufe else None
+        laeuft = letzter is not None and letzter["status"] != "completed"
+        test_ok = letzter is not None and letzter["ergebnis"] == "success"
+        konto = (f" ({cfg['versand_adresse']} über {cfg['versand_server']})"
+                 if cfg.get("versand_adresse") and cfg.get("versand_server") else "")
+
         haken = lambda ok: "✓" if ok else "○"
         st.html('<ul class="rsl-status">' + "".join(
-            f'<li class="{"" if ok else "offen"}">{haken(ok)}&nbsp; {t}</li>'
-            for ok, t in ((inhalt_ok, "Inhalt gewählt"), (zugang_ok, "E-Mail-Zugang hinterlegt"),
-                          (stand["zeitplan"], "Zeitplan eingerichtet"))) + "</ul>")
-        if inhalt_ok and zugang_ok and stand["zeitplan"] and cfg.get("aktiv", "ja") != "nein":
-            st.success(f"Die nächste E-Mail kommt am Freitag, {naechster_freitag()}, gegen 13 Uhr.")
+            f'<li class="{"" if ok else "offen"}">{haken(ok)}&nbsp; {html.escape(t)}</li>'
+            for ok, t in ((zugang_ok, "E-Mail-Zugang hinterlegt" + konto),
+                          (stand["zeitplan"], "Zeitplan eingerichtet"),
+                          (test_ok, "Letzte E-Mail erfolgreich verschickt"))) + "</ul>")
+
+        if laeuft:
+            st.info("Eine E-Mail wird gerade erstellt und verschickt. In 1–3 Minuten unten auf "
+                    "»Status aktualisieren« tippen.")
+        elif letzter is not None and letzter["ergebnis"] == "failure":
+            gruende = st.session_state.setdefault("fehlergruende", {})
+            if letzter["id"] not in gruende:
+                try:
+                    gruende[letzter["id"]] = gh.fehlergrund(letzter["id"])
+                except Exception:
+                    gruende[letzter["id"]] = ""
+            grund = gruende[letzter["id"]] or "Der Grund ließ sich nicht auslesen – siehe Link unter »Letzte Läufe«."
+            st.error(f"**Die letzte E-Mail ist nicht angekommen.** {grund}")
+        elif test_ok and zugang_ok and stand["zeitplan"] and cfg.get("aktiv", "ja") != "nein":
+            st.success(f"Alles eingerichtet. Die nächste E-Mail kommt am Freitag, {naechster_freitag()}, "
+                       "gegen 13 Uhr.")
+        elif zugang_ok and stand["zeitplan"]:
+            st.info("Fast fertig: Sende unten eine Testmail, um zu prüfen, ob alles funktioniert.")
 
         # ---- Inhalt
         with st.container(key="karte_mail_inhalt"):
@@ -528,10 +554,16 @@ with tab_mail:
                     st.error("Bitte Anbieter, E-Mail-Adresse und Passwort ausfüllen.")
                 else:
                     try:
-                        gh.setze_secrets({"SMTP_SERVER": server, "SMTP_PORT": str(port), "SMTP_BENUTZER": adresse,
-                                          "SMTP_PASSWORT": passwort, "EMAIL_AN": empfaenger.strip() or adresse})
+                        gh.setze_secrets({"SMTP_SERVER": server, "SMTP_PORT": str(port),
+                                          "SMTP_BENUTZER": adresse.strip(), "SMTP_PASSWORT": passwort,
+                                          "EMAIL_AN": empfaenger.strip() or adresse.strip()})
                         stand["secrets"] = gh.vorhandene_secrets()
-                        st.success("Zugangsdaten verschlüsselt gespeichert.")
+                        # Adresse und Server (ohne Passwort) merken, damit oben angezeigt wird, was hinterlegt ist
+                        neu = dict(stand["cfg"], versand_adresse=adresse.strip(), versand_server=server)
+                        gh.schreibe_datei("email_einstellungen.txt", wm.einstellungen_als_text(neu),
+                                          "E-Mail-Konto geändert (aus der App)")
+                        stand["cfg"] = neu
+                        st.success("Zugangsdaten verschlüsselt gespeichert. Jetzt unten eine Testmail senden.")
                     except Exception as e:
                         st.error(f"Speichern fehlgeschlagen: {e}")
 
@@ -552,14 +584,11 @@ with tab_mail:
             if st.button("Testmail jetzt senden", disabled=not (stand["zeitplan"] and zugang_ok)):
                 try:
                     gh.jetzt_starten()
-                    st.success("Gestartet. Die E-Mail kommt in etwa 3–5 Minuten.")
+                    st.success("Gestartet. In 2–4 Minuten auf »Status aktualisieren« tippen – oben steht dann, "
+                               "ob die E-Mail verschickt wurde.")
                 except Exception as e:
                     st.error(str(e))
             if stand["zeitplan"]:
-                try:
-                    laeufe = gh.letzte_laeufe()
-                except Exception:
-                    laeufe = []
                 if laeufe:
                     st.caption("Letzte Läufe:")
                     for l in laeufe:

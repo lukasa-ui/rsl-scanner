@@ -158,5 +158,26 @@ class GitHub:
         if a.status_code == 404:
             return []
         a.raise_for_status()
-        return [{"status": r.get("status"), "ergebnis": r.get("conclusion"), "start": r.get("created_at"),
-                 "art": r.get("event"), "link": r.get("html_url")} for r in a.json().get("workflow_runs", [])]
+        return [{"id": r.get("id"), "status": r.get("status"), "ergebnis": r.get("conclusion"),
+                 "start": r.get("created_at"), "art": r.get("event"), "link": r.get("html_url")}
+                for r in a.json().get("workflow_runs", [])]
+
+    def fehlergrund(self, lauf_id) -> str:
+        """Liest das Protokoll eines fehlgeschlagenen Laufs und gibt die Zeile »FEHLER: …« zurück."""
+        import re
+
+        a = self._anfrage("GET", f"/actions/runs/{lauf_id}/jobs")
+        a.raise_for_status()
+        jobs = a.json().get("jobs", [])
+        if not jobs:
+            return ""
+        b = self._anfrage("GET", f"/actions/jobs/{jobs[0]['id']}/logs")
+        if b.status_code != 200:
+            return ""
+        zeilen = [re.sub(r"^\S+Z\s", "", z) for z in b.text.splitlines()]
+        treffer = [z.split("FEHLER:", 1)[1].strip() for z in zeilen if "FEHLER:" in z]
+        if treffer:
+            return treffer[-1]
+        # Fallback: letzte aussagekräftige Zeile vor der Fehlermeldung von GitHub
+        nutzbar = [z for z in zeilen if z.strip() and not z.startswith("##[") and "exit code" not in z]
+        return nutzbar[-1][:300] if nutzbar else ""

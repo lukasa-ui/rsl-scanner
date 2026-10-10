@@ -72,6 +72,9 @@ def einstellungen_als_text(cfg: dict) -> str:
         f"app_link = {cfg.get('app_link', '')}",
         "# E-Mail an/aus: ja oder nein",
         f"aktiv = {cfg.get('aktiv', 'ja')}",
+        "# Nur zur Anzeige in der App (das Passwort liegt verschlüsselt bei GitHub):",
+        f"versand_adresse = {cfg.get('versand_adresse', '')}",
+        f"versand_server = {cfg.get('versand_server', '')}",
         "",
     ]
     return "\n".join(zeilen)
@@ -240,6 +243,8 @@ def sende(betreff: str, html_text: str, anhang: bytes | None = None):
     server = os.environ.get("SMTP_SERVER", "").strip()
     an = os.environ.get("EMAIL_AN", "").strip()
     if not server or not an:
+        if os.environ.get("GITHUB_ACTIONS") == "true":
+            raise RuntimeError("ZUGANG_FEHLT")
         datei = k.BASIS / "wochenmail_vorschau.html"
         datei.write_text(html_text, encoding="utf-8")
         print(f"Keine Zugangsdaten (SMTP_SERVER/EMAIL_AN) – nur Vorschau gespeichert: {datei}")
@@ -247,6 +252,8 @@ def sende(betreff: str, html_text: str, anhang: bytes | None = None):
     port = int(os.environ.get("SMTP_PORT", "587") or 587)
     benutzer = os.environ.get("SMTP_BENUTZER", "").strip()
     passwort = os.environ.get("SMTP_PASSWORT", "")
+    if not benutzer or not passwort:
+        raise RuntimeError("ZUGANG_FEHLT")
     msg = EmailMessage()
     msg["Subject"] = betreff
     msg["From"] = os.environ.get("EMAIL_VON", "").strip() or benutzer
@@ -306,9 +313,37 @@ def main():
     sende(betreff, baue_html(cfg, daten), baue_excel(daten))
 
 
+def verstaendlicher_fehler(e: Exception) -> str:
+    """Übersetzt typische Fehler in einen Satz mit Lösungshinweis (wird in der App angezeigt)."""
+    import socket
+    text = str(e)
+    if isinstance(e, smtplib.SMTPAuthenticationError):
+        return ("Der E-Mail-Anbieter hat die Anmeldung abgelehnt. Entweder stimmen Adresse oder Passwort nicht, "
+                "oder der Zugriff für E-Mail-Programme ist beim Anbieter noch nicht freigeschaltet "
+                "(GMX/WEB.DE: »POP3/IMAP Abruf« erlauben; Gmail: App-Passwort verwenden).")
+    if isinstance(e, socket.gaierror):
+        return "Der E-Mail-Server wurde nicht gefunden. Bitte den Anbieter in der App neu auswählen und speichern."
+    if isinstance(e, (smtplib.SMTPConnectError, smtplib.SMTPServerDisconnected, TimeoutError, ConnectionError,
+                      OSError)) and not isinstance(e, smtplib.SMTPException) or isinstance(e, smtplib.SMTPConnectError):
+        return f"Der E-Mail-Server war nicht erreichbar (Server oder Port falsch?). Technisch: {text[:150]}"
+    if isinstance(e, smtplib.SMTPRecipientsRefused):
+        return "Die Empfängeradresse wurde abgelehnt. Bitte in der App prüfen."
+    if isinstance(e, smtplib.SMTPSenderRefused):
+        return "Der Anbieter lehnt die Absenderadresse ab. Absender muss die eigene Adresse beim Anbieter sein."
+    if isinstance(e, smtplib.SMTPException):
+        return f"Der E-Mail-Server hat einen Fehler gemeldet: {text[:200]}"
+    if text == "ZUGANG_FEHLT":
+        return "Die E-Mail-Zugangsdaten fehlen oder sind unvollständig. Bitte in der App unter »E-Mail« eintragen."
+    if "Kursdaten" in text:
+        return "Yahoo hat keine Kurse geliefert (vorübergehende Sperre). Später erneut versuchen."
+    return f"Unerwarteter Fehler: {type(e).__name__}: {text[:200]}"
+
+
 if __name__ == "__main__":
     try:
         main()
     except Exception as fehler:
-        print(f"FEHLER: {fehler}", file=sys.stderr)
+        import traceback
+        traceback.print_exc()
+        print(f"FEHLER: {verstaendlicher_fehler(fehler)}", flush=True)
         sys.exit(1)
