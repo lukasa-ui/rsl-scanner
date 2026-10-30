@@ -14,6 +14,14 @@ import streamlit as st
 
 import rsl_kern as k
 import rsl_erweiterung as ext
+
+def geheimnis(name: str, standard=None):
+    """Wert aus den Streamlit-Secrets (App-Einstellungen bei share.streamlit.io)."""
+    try:
+        return st.secrets.get(name, standard)
+    except Exception:
+        return standard
+
 st.set_page_config(page_title="RSL-Scanner", page_icon="📈", layout="centered")
 
 
@@ -305,6 +313,7 @@ with tab_scan:
                     st.session_state.pop("rangliste", None)
                     st.session_state.pop("zuletzt_geoeffnet", None)
 
+    anzeige = pd.DataFrame()
     erg = st.session_state.get("ergebnis")
     if erg and not erg["df"].empty:
         df = k.depot_markieren(erg["df"], erg["depot"], grenze)
@@ -343,137 +352,137 @@ with tab_scan:
             ereignis = zeige_tabelle(anzeige, grenze, "rangliste")
             st.caption("Zeile antippen für Chart und Kennzahlen. Δ = Plätze seit letzter Woche.")
 
-# Aktien aus der Rangliste in Depot oder Watchlist übernehmen
-if not anzeige.empty:
-    st.markdown("#### Aktie übernehmen")
-
-    ticker_optionen = anzeige["Ticker"].tolist()
-
-    ausgewaehlter_ticker = st.selectbox(
-        "Aktie auswählen",
-        ticker_optionen,
-        key="portfolio_auswahl_rangliste",
-    )
-
-    ausgewaehlte_zeile = anzeige[
-        anzeige["Ticker"] == ausgewaehlter_ticker
-    ].iloc[0]
-
-    aktion_links, aktion_mitte, aktion_rechts = st.columns(3)
-
-    if aktion_links.button(
-        "＋ Ins Depot",
-        key="rangliste_ins_depot",
-        width="stretch",
-    ):
-        token = geheimnis("GITHUB_TOKEN")
-        projekt = geheimnis("GITHUB_PROJEKT", "lukasa-ui/rsl-scanner")
-
-        if not token:
-            st.error("GITHUB_TOKEN fehlt in den Streamlit-Secrets.")
-        else:
-            import github_verbindung as ghv
-
-            gh = ghv.GitHub(token, projekt)
-            portfolio = ext.portfolio_laden(gh)
-
-            ext.depot_hinzufuegen(
-                portfolio,
-                ausgewaehlter_ticker,
-                ausgewaehlte_zeile["Name"],
-                ausgewaehlte_zeile["RSL"],
-            )
-
-            ext.portfolio_speichern(gh, portfolio)
-            st.success(
-                f"{ausgewaehlter_ticker} wurde mit einem Referenz-RSL "
-                f"von {ausgewaehlte_zeile['RSL']:.3f} ins Depot aufgenommen."
-            )
-            st.rerun()
-
-    if aktion_mitte.button(
-        "＋ Watchlist",
-        key="rangliste_in_watchlist",
-        width="stretch",
-    ):
-        token = geheimnis("GITHUB_TOKEN")
-        projekt = geheimnis("GITHUB_PROJEKT", "lukasa-ui/rsl-scanner")
-
-        if not token:
-            st.error("GITHUB_TOKEN fehlt in den Streamlit-Secrets.")
-        else:
-            import github_verbindung as ghv
-
-            gh = ghv.GitHub(token, projekt)
-            portfolio = ext.portfolio_laden(gh)
-
-            if ausgewaehlter_ticker in portfolio["depot"]:
-                st.warning("Die Aktie befindet sich bereits im Depot.")
+    # Aktien aus der Rangliste in Depot oder Watchlist übernehmen
+    if not anzeige.empty:
+        st.markdown("#### Aktie übernehmen")
+    
+        ticker_optionen = anzeige["Ticker"].tolist()
+    
+        ausgewaehlter_ticker = st.selectbox(
+            "Aktie auswählen",
+            ticker_optionen,
+            key="portfolio_auswahl_rangliste",
+        )
+    
+        ausgewaehlte_zeile = anzeige[
+            anzeige["Ticker"] == ausgewaehlter_ticker
+        ].iloc[0]
+    
+        aktion_links, aktion_mitte, aktion_rechts = st.columns(3)
+    
+        if aktion_links.button(
+            "＋ Ins Depot",
+            key="rangliste_ins_depot",
+            width="stretch",
+        ):
+            token = geheimnis("GITHUB_TOKEN")
+            projekt = geheimnis("GITHUB_PROJEKT", "lukasa-ui/rsl-scanner")
+    
+            if not token:
+                st.error("GITHUB_TOKEN fehlt in den Streamlit-Secrets.")
             else:
-                ext.watchlist_hinzufuegen(
+                import github_verbindung as ghv
+    
+                gh = ghv.GitHub(token, projekt)
+                portfolio = ext.portfolio_laden(gh)
+    
+                ext.depot_hinzufuegen(
                     portfolio,
                     ausgewaehlter_ticker,
                     ausgewaehlte_zeile["Name"],
+                    ausgewaehlte_zeile["RSL"],
                 )
+    
                 ext.portfolio_speichern(gh, portfolio)
-                st.success(f"{ausgewaehlter_ticker} wurde vorgemerkt.")
+                st.success(
+                    f"{ausgewaehlter_ticker} wurde mit einem Referenz-RSL "
+                    f"von {ausgewaehlte_zeile['RSL']:.3f} ins Depot aufgenommen."
+                )
                 st.rerun()
-
-    if aktion_rechts.button(
-        "Depot-Status",
-        key="rangliste_depot_status",
-        width="stretch",
-    ):
-        token = geheimnis("GITHUB_TOKEN")
-        projekt = geheimnis("GITHUB_PROJEKT", "lukasa-ui/rsl-scanner")
-
-        if not token:
-            st.error("GITHUB_TOKEN fehlt in den Streamlit-Secrets.")
-        else:
-            import github_verbindung as ghv
-
-            gh = ghv.GitHub(token, projekt)
-            portfolio = ext.portfolio_laden(gh)
-
-            if ausgewaehlter_ticker in portfolio["depot"]:
-                st.info("Diese Aktie befindet sich bereits im Depot.")
-            elif ausgewaehlter_ticker in portfolio["watchlist"]:
-                st.info("Diese Aktie befindet sich bereits auf der Watchlist.")
+    
+        if aktion_mitte.button(
+            "＋ Watchlist",
+            key="rangliste_in_watchlist",
+            width="stretch",
+        ):
+            token = geheimnis("GITHUB_TOKEN")
+            projekt = geheimnis("GITHUB_PROJEKT", "lukasa-ui/rsl-scanner")
+    
+            if not token:
+                st.error("GITHUB_TOKEN fehlt in den Streamlit-Secrets.")
             else:
-                st.info("Diese Aktie ist noch nicht gespeichert.")
-
-            ersatz = [q for q, _, _, ok in erg["herkunft"] if not ok]
-            if ersatz or erg["fehler_quellen"]:
-                st.warning("Nicht live abrufbar: " + ", ".join(ersatz + [q for q, _ in erg["fehler_quellen"]])
-                           + ". Dafür wurde die hinterlegte Liste verwendet – Details unter »Mehr zu diesem Scan«.")
-
-            zeilen = ereignis.selection.rows if ereignis is not None else []
-            gewaehlt = anzeige.iloc[zeilen[0]]["Ticker"] if zeilen else None
-            # Fenster nur öffnen, wenn gerade eine neue Zeile angetippt wurde (nicht bei jeder anderen Eingabe)
-            if gewaehlt and st.session_state.get("zuletzt_geoeffnet") != gewaehlt:
-                st.session_state["zuletzt_geoeffnet"] = gewaehlt
-                zeile = erg["df"][erg["df"]["Ticker"] == gewaehlt].iloc[0]
-                details_fenster(gewaehlt, zeile["Name"], erg["kurse"][gewaehlt], erg["n"], zeile)
-            elif not gewaehlt:
-                st.session_state.pop("zuletzt_geoeffnet", None)
-
-            with st.expander("Mehr zu diesem Scan"):
-                neu = k.neu_in_top(erg["df"], grenze)
-                if not neu.empty:
-                    st.markdown(f"**Neu in den besten {grenze} %** seit letzter Woche: "
-                                + ", ".join(f"{r.Ticker} ({r.Rang})" for r in neu.itertuples()))
-                if erg["fehlend"]:
-                    st.markdown(f"**Ohne Kursdaten ({len(erg['fehlend'])}):** " + ", ".join(erg["fehlend"]))
-                st.markdown("**Herkunft der Indexlisten:**\n" + "\n".join(
-                    f"- {q}: {a} Werte, {h}" for q, a, h, _ in erg["herkunft"]) if erg["herkunft"] else
-                    "**Herkunft:** nur eigene Listen.")
-                for q, t in erg["fehler_quellen"]:
-                    st.markdown(f"- {q}: nicht geladen ({t})")
-                datum = dt.date.today().isoformat()
-                d1, d2 = st.columns(2)
-                d1.download_button("Excel herunterladen", k.als_excel(df), f"rsl_{datum}.xlsx", width="stretch")
-                d2.download_button("CSV herunterladen", k.als_csv(df), f"rsl_{datum}.csv", "text/csv", width="stretch")
-
+                import github_verbindung as ghv
+    
+                gh = ghv.GitHub(token, projekt)
+                portfolio = ext.portfolio_laden(gh)
+    
+                if ausgewaehlter_ticker in portfolio["depot"]:
+                    st.warning("Die Aktie befindet sich bereits im Depot.")
+                else:
+                    ext.watchlist_hinzufuegen(
+                        portfolio,
+                        ausgewaehlter_ticker,
+                        ausgewaehlte_zeile["Name"],
+                    )
+                    ext.portfolio_speichern(gh, portfolio)
+                    st.success(f"{ausgewaehlter_ticker} wurde vorgemerkt.")
+                    st.rerun()
+    
+        if aktion_rechts.button(
+            "Depot-Status",
+            key="rangliste_depot_status",
+            width="stretch",
+        ):
+            token = geheimnis("GITHUB_TOKEN")
+            projekt = geheimnis("GITHUB_PROJEKT", "lukasa-ui/rsl-scanner")
+    
+            if not token:
+                st.error("GITHUB_TOKEN fehlt in den Streamlit-Secrets.")
+            else:
+                import github_verbindung as ghv
+    
+                gh = ghv.GitHub(token, projekt)
+                portfolio = ext.portfolio_laden(gh)
+    
+                if ausgewaehlter_ticker in portfolio["depot"]:
+                    st.info("Diese Aktie befindet sich bereits im Depot.")
+                elif ausgewaehlter_ticker in portfolio["watchlist"]:
+                    st.info("Diese Aktie befindet sich bereits auf der Watchlist.")
+                else:
+                    st.info("Diese Aktie ist noch nicht gespeichert.")
+    
+        ersatz = [q for q, _, _, ok in erg["herkunft"] if not ok]
+        if ersatz or erg["fehler_quellen"]:
+            st.warning("Nicht live abrufbar: " + ", ".join(ersatz + [q for q, _ in erg["fehler_quellen"]])
+                       + ". Dafür wurde die hinterlegte Liste verwendet – Details unter »Mehr zu diesem Scan«.")
+    
+        zeilen = ereignis.selection.rows if ereignis is not None else []
+        gewaehlt = anzeige.iloc[zeilen[0]]["Ticker"] if zeilen else None
+        # Fenster nur öffnen, wenn gerade eine neue Zeile angetippt wurde (nicht bei jeder anderen Eingabe)
+        if gewaehlt and st.session_state.get("zuletzt_geoeffnet") != gewaehlt:
+            st.session_state["zuletzt_geoeffnet"] = gewaehlt
+            zeile = erg["df"][erg["df"]["Ticker"] == gewaehlt].iloc[0]
+            details_fenster(gewaehlt, zeile["Name"], erg["kurse"][gewaehlt], erg["n"], zeile)
+        elif not gewaehlt:
+            st.session_state.pop("zuletzt_geoeffnet", None)
+    
+        with st.expander("Mehr zu diesem Scan"):
+            neu = k.neu_in_top(erg["df"], grenze)
+            if not neu.empty:
+                st.markdown(f"**Neu in den besten {grenze} %** seit letzter Woche: "
+                            + ", ".join(f"{r.Ticker} ({r.Rang})" for r in neu.itertuples()))
+            if erg["fehlend"]:
+                st.markdown(f"**Ohne Kursdaten ({len(erg['fehlend'])}):** " + ", ".join(erg["fehlend"]))
+            st.markdown("**Herkunft der Indexlisten:**\n" + "\n".join(
+                f"- {q}: {a} Werte, {h}" for q, a, h, _ in erg["herkunft"]) if erg["herkunft"] else
+                "**Herkunft:** nur eigene Listen.")
+            for q, t in erg["fehler_quellen"]:
+                st.markdown(f"- {q}: nicht geladen ({t})")
+            datum = dt.date.today().isoformat()
+            d1, d2 = st.columns(2)
+            d1.download_button("Excel herunterladen", k.als_excel(df), f"rsl_{datum}.xlsx", width="stretch")
+            d2.download_button("CSV herunterladen", k.als_csv(df), f"rsl_{datum}.csv", "text/csv", width="stretch")
+    
 # ---------------- Aktie suchen
 
 # ---------------- Mein Depot
@@ -647,12 +656,6 @@ with tab_einzel:
                 st.code(f"{symbol:<12}# {name}", language=None)
 
 # ---------------- E-Mail
-def geheimnis(name: str, standard=None):
-    """Wert aus den Streamlit-Secrets (App-Einstellungen bei share.streamlit.io)."""
-    try:
-        return st.secrets.get(name, standard)
-    except Exception:
-        return standard
 
 
 def naechster_freitag() -> str:
