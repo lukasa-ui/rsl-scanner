@@ -27,6 +27,16 @@
       "stop_aktiv": false,
       "stop_schwelle": 0.75,
       "stop_ausgeloest": false
+    },
+    "BILL.ST": {
+      "name": "Billerud (ehem. BillerudKorsnäs)",
+      "referenz_rsl": 1.1894188955552099,
+      "hinzugefuegt": "2026-10-30T18:59:41.772737+00:00",
+      "aufnahme_kurs": null,
+      "sektor": null,
+      "stop_aktiv": false,
+      "stop_schwelle": 0.75,
+      "stop_ausgeloest": false
     }
   },
   "watchlist": {}
