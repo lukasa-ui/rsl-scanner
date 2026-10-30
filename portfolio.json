@@ -37,6 +37,16 @@
       "stop_aktiv": false,
       "stop_schwelle": 0.75,
       "stop_ausgeloest": false
+    },
+    "7752.T": {
+      "name": "Ricoh",
+      "referenz_rsl": 1.156699264111936,
+      "hinzugefuegt": "2026-10-30T18:59:52.691269+00:00",
+      "aufnahme_kurs": null,
+      "sektor": null,
+      "stop_aktiv": false,
+      "stop_schwelle": 0.75,
+      "stop_ausgeloest": false
     }
   },
   "watchlist": {}
