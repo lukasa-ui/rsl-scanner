@@ -7,6 +7,16 @@
       "stop_aktiv": false,
       "stop_schwelle": 0.75,
       "stop_ausgeloest": false
+    },
+    "DSY.PA": {
+      "name": "Dassault Systèmes",
+      "referenz_rsl": 1.2346366027682325,
+      "hinzugefuegt": "2026-10-30T18:59:06.850226+00:00",
+      "aufnahme_kurs": null,
+      "sektor": null,
+      "stop_aktiv": false,
+      "stop_schwelle": 0.75,
+      "stop_ausgeloest": false
     }
   },
   "watchlist": {}
