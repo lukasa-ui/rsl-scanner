@@ -493,10 +493,23 @@ with tab_depot:
                 aktueller_rsl = None
 
                 erg = st.session_state.get("ergebnis")
+                kursserie = pd.Series(dtype=float)
+
                 if erg is not None and ticker in erg["df"]["Ticker"].values:
                     treffer = erg["df"][erg["df"]["Ticker"] == ticker]
                     if not treffer.empty:
                         aktueller_rsl = float(treffer.iloc[0]["RSL"])
+
+                # Kursdaten aus dem letzten Scan wiederverwenden, sonst gezielt nachladen.
+                if erg is not None and ticker in erg.get("kurse", pd.DataFrame()).columns:
+                    kursserie = erg["kurse"][ticker].dropna()
+                else:
+                    try:
+                        einzelkurse, kursfehler = k.lade_kurse((ticker,))
+                        if einzelkurse is not None and not einzelkurse.empty and ticker in einzelkurse.columns:
+                            kursserie = einzelkurse[ticker].dropna()
+                    except Exception:
+                        kursserie = pd.Series(dtype=float)
 
                 if aktueller_rsl is None:
                     mitte.caption(f"Referenz-RSL: {referenz:.3f}")
