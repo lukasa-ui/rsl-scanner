@@ -1,17 +1,16 @@
 """
 Verbindung der App zum eigenen GitHub-Projekt.
 
-Damit lassen sich die E-Mail-Einstellungen direkt in der App ändern:
-- email_einstellungen.txt lesen und speichern
-- E-Mail-Zugangsdaten verschlüsselt als GitHub-»Secrets« ablegen (nur schreibbar, nie lesbar)
-- den Freitags-Zeitplan (.github/workflows/wochenmail.yml) anlegen
-- die E-Mail sofort von Hand starten und den Status der letzten Läufe abfragen
-
-Benötigt einen »Fine-grained personal access token« mit Zugriff auf genau dieses Projekt und den Rechten
-Contents, Secrets, Workflows und Actions (jeweils Read and write).
+Unterstützt:
+- Dateien lesen und schreiben
+- GitHub Actions Secrets verschlüsselt setzen
+- den Wochenmail-Workflow einrichten, starten und überwachen
 """
 
 import base64
+import io
+import re
+import zipfile
 
 import requests
 
@@ -24,10 +23,10 @@ WORKFLOW_YML = """name: RSL-Wochenmail
 
 on:
   schedule:
-    # Freitags gegen 13 Uhr deutscher Zeit. GitHub rechnet in UTC, daher zwei Zeilen:
-    - cron: "50 10 * * 5"   # 12:50 Uhr Sommerzeit
-    - cron: "50 11 * * 5"   # 12:50 Uhr Winterzeit
-  workflow_dispatch:        # Start von Hand (auch über die App: »Testmail jetzt senden«)
+    # Freitags 12:50 Uhr deutscher Zeit: Sommer- und Winterzeit in UTC abbilden.
+    - cron: "50 10 * * 5"
+    - cron: "50 11 * * 5"
+  workflow_dispatch:
 
 jobs:
   wochenmail:
@@ -51,133 +50,274 @@ jobs:
         run: python wochenmail.py
 """
 
-# Bekannte Anbieter: Server, Port und ein Hinweis, was beim Anbieter vorher einzuschalten ist
 ANBIETER = {
-    "GMX": ("mail.gmx.net", 587,
-            "Bei GMX vorher einschalten: E-Mail → Einstellungen → POP3/IMAP Abruf → »POP3 und IMAP Zugriff erlauben«."),
-    "WEB.DE": ("smtp.web.de", 587,
-               "Bei WEB.DE vorher einschalten: E-Mail → Einstellungen → POP3/IMAP Abruf → Zugriff erlauben."),
-    "Gmail": ("smtp.gmail.com", 465,
-              "Bei Gmail funktioniert nur ein App-Passwort: Google-Konto → Sicherheit → Bestätigung in zwei Schritten "
-              "einschalten → App-Passwörter → neues Passwort erstellen und hier eintragen."),
-    "T-Online": ("securesmtp.t-online.de", 465,
-                 "Bei T-Online das eigene E-Mail-Passwort aus dem Kundencenter verwenden (nicht das Login-Passwort)."),
-    "Anderer Anbieter": ("", 587, "Server und Port findest du in der Hilfe deines Anbieters unter »SMTP«."),
+    "GMX": (
+        "mail.gmx.net",
+        587,
+        "Bei GMX vorher den POP3/IMAP-Zugriff in den E-Mail-Einstellungen erlauben.",
+    ),
+    "WEB.DE": (
+        "smtp.web.de",
+        587,
+        "Bei WEB.DE vorher den POP3/IMAP-Zugriff in den E-Mail-Einstellungen erlauben.",
+    ),
+    "Gmail": (
+        "smtp.gmail.com",
+        465,
+        "Bei Gmail ein App-Passwort verwenden. Dafür muss die Bestätigung in zwei Schritten aktiv sein.",
+    ),
+    "T-Online": (
+        "securesmtp.t-online.de",
+        465,
+        "Bei T-Online das E-Mail-Passwort aus dem Kundencenter verwenden.",
+    ),
+    "Anderer Anbieter": (
+        "",
+        587,
+        "Server und Port findest du in den SMTP-Einstellungen deines Anbieters.",
+    ),
 }
 
 
 class GitHubFehler(RuntimeError):
-    pass
+    """Fehler bei GitHub API oder Berechtigungen."""
 
 
 class GitHub:
     def __init__(self, token: str, projekt: str, zweig: str = "main", sitzung=None):
-        self.projekt = projekt
+        self.projekt = projekt.strip("/")
         self.zweig = zweig
         self.http = sitzung or requests.Session()
-        self.kopf = {"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json",
-                     "X-GitHub-Api-Version": "2022-11-28"}
+        self.kopf = {
+            "Authorization": f"Bearer {token}",
+            "Accept": "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28",
+        }
 
-    # -------------------------------------------------------------- Grundfunktionen
     def _anfrage(self, art: str, pfad: str, **kw):
-        antwort = self.http.request(art, f"{API}/repos/{self.projekt}{pfad}", headers=self.kopf, timeout=30, **kw)
+        try:
+            antwort = self.http.request(
+                art,
+                f"{API}/repos/{self.projekt}{pfad}",
+                headers=self.kopf,
+                timeout=30,
+                **kw,
+            )
+        except requests.RequestException as exc:
+            raise GitHubFehler(f"GitHub ist nicht erreichbar: {exc}") from exc
+
         if antwort.status_code == 401:
             raise GitHubFehler("Der GitHub-Schlüssel ist ungültig oder abgelaufen.")
         if antwort.status_code == 403:
-            raise GitHubFehler("Dem GitHub-Schlüssel fehlt eine Berechtigung (Contents, Secrets, Workflows oder "
-                               "Actions jeweils auf »Read and write« stellen).")
+            raise GitHubFehler(
+                "Dem GitHub-Schlüssel fehlt eine Berechtigung. Prüfe Contents, "
+                "Secrets, Workflows und Actions sowie den Zugriff auf das Repository."
+            )
         return antwort
 
     def pruefen(self) -> str:
-        """Prüft Schlüssel und Projekt. Gibt den Projektnamen zurück."""
+        """Prüft Schlüssel und Repository-Zugriff."""
         a = self._anfrage("GET", "")
         if a.status_code == 404:
-            raise GitHubFehler(f"Projekt »{self.projekt}« nicht gefunden oder der Schlüssel hat keinen Zugriff darauf.")
+            raise GitHubFehler(
+                f"Repository '{self.projekt}' nicht gefunden oder kein Zugriff darauf."
+            )
         a.raise_for_status()
         return a.json().get("full_name", self.projekt)
 
-    # -------------------------------------------------------------- Dateien
     def lies_datei(self, pfad: str) -> tuple[str | None, str | None]:
-        """Gibt (Inhalt, sha) zurück – (None, None), wenn die Datei nicht existiert."""
-        a = self._anfrage("GET", f"/contents/{pfad}", params={"ref": self.zweig})
+        """Gibt (Inhalt, SHA) zurück. Bei fehlender Datei (None, None)."""
+        a = self._anfrage(
+            "GET",
+            f"/contents/{pfad}",
+            params={"ref": self.zweig},
+        )
         if a.status_code == 404:
+            # 404 kann auch ein fehlender Repository-Zugriff sein.
+            self.pruefen()
             return None, None
+
         a.raise_for_status()
         daten = a.json()
-        return base64.b64decode(daten["content"]).decode("utf-8"), daten["sha"]
+        if daten.get("type") != "file":
+            raise GitHubFehler(f"{pfad} ist keine normale Datei.")
+
+        kodiert = daten.get("content", "")
+        if not kodiert and daten.get("encoding") == "base64":
+            raise GitHubFehler(f"GitHub hat für {pfad} keinen Dateiinhalt geliefert.")
+
+        try:
+            inhalt = base64.b64decode(kodiert).decode("utf-8")
+        except (ValueError, UnicodeDecodeError) as exc:
+            raise GitHubFehler(f"Datei {pfad} konnte nicht dekodiert werden.") from exc
+
+        return inhalt, daten.get("sha")
 
     def schreibe_datei(self, pfad: str, inhalt: str, nachricht: str):
         _, sha = self.lies_datei(pfad)
-        nutzlast = {"message": nachricht, "branch": self.zweig,
-                    "content": base64.b64encode(inhalt.encode("utf-8")).decode("ascii")}
+        nutzlast = {
+            "message": nachricht,
+            "branch": self.zweig,
+            "content": base64.b64encode(inhalt.encode("utf-8")).decode("ascii"),
+        }
         if sha:
             nutzlast["sha"] = sha
+
         a = self._anfrage("PUT", f"/contents/{pfad}", json=nutzlast)
         if a.status_code not in (200, 201):
-            raise GitHubFehler(f"Speichern von {pfad} fehlgeschlagen ({a.status_code}): {a.text[:200]}")
+            raise GitHubFehler(
+                f"Speichern von {pfad} fehlgeschlagen ({a.status_code}): {a.text[:300]}"
+            )
 
-    # -------------------------------------------------------------- Secrets
     def setze_secrets(self, werte: dict[str, str]):
-        from nacl import encoding, public
+        """Setzt GitHub Actions Secrets. Die Werte sind danach nicht auslesbar."""
+        try:
+            from nacl import encoding, public
+        except ImportError as exc:
+            raise GitHubFehler(
+                "PyNaCl fehlt. Ergänze 'pynacl' in requirements.txt und installiere es."
+            ) from exc
 
         a = self._anfrage("GET", "/actions/secrets/public-key")
         a.raise_for_status()
         schluessel = a.json()
-        box = public.SealedBox(public.PublicKey(schluessel["key"].encode("utf-8"), encoding.Base64Encoder()))
+        box = public.SealedBox(
+            public.PublicKey(
+                schluessel["key"].encode("utf-8"),
+                encoding.Base64Encoder(),
+            )
+        )
+
         for name, wert in werte.items():
-            verschluesselt = base64.b64encode(box.encrypt(str(wert).encode("utf-8"))).decode("utf-8")
-            b = self._anfrage("PUT", f"/actions/secrets/{name}",
-                              json={"encrypted_value": verschluesselt, "key_id": schluessel["key_id"]})
+            if not re.fullmatch(r"[A-Z0-9_]+", name):
+                raise ValueError(f"Ungültiger Secret-Name: {name}")
+
+            verschluesselt = base64.b64encode(
+                box.encrypt(str(wert).encode("utf-8"))
+            ).decode("utf-8")
+
+            b = self._anfrage(
+                "PUT",
+                f"/actions/secrets/{name}",
+                json={
+                    "encrypted_value": verschluesselt,
+                    "key_id": schluessel["key_id"],
+                },
+            )
             if b.status_code not in (201, 204):
-                raise GitHubFehler(f"Secret {name} konnte nicht gespeichert werden ({b.status_code}).")
+                raise GitHubFehler(
+                    f"Secret {name} konnte nicht gespeichert werden "
+                    f"({b.status_code}): {b.text[:200]}"
+                )
 
     def vorhandene_secrets(self) -> dict[str, str]:
-        """Name -> Zeitpunkt der letzten Änderung (die Werte selbst sind nicht lesbar)."""
-        a = self._anfrage("GET", "/actions/secrets", params={"per_page": 100})
+        """Liefert Secret-Namen und Änderungszeitpunkte, niemals Secret-Werte."""
+        a = self._anfrage(
+            "GET",
+            "/actions/secrets",
+            params={"per_page": 100},
+        )
         a.raise_for_status()
-        return {s["name"]: s.get("updated_at", "") for s in a.json().get("secrets", [])}
+        return {
+            secret["name"]: secret.get("updated_at", "")
+            for secret in a.json().get("secrets", [])
+        }
 
-    # -------------------------------------------------------------- Zeitplan und Läufe
     def zeitplan_vorhanden(self) -> bool:
         inhalt, _ = self.lies_datei(WORKFLOW_PFAD)
         return inhalt is not None
 
     def zeitplan_einrichten(self):
-        self.schreibe_datei(WORKFLOW_PFAD, WORKFLOW_YML, "Zeitplan für die Freitags-E-Mail (aus der App)")
+        self.schreibe_datei(
+            WORKFLOW_PFAD,
+            WORKFLOW_YML,
+            "Zeitplan für die Freitags-E-Mail (aus der App)",
+        )
 
     def jetzt_starten(self):
-        a = self._anfrage("POST", f"/actions/workflows/{WORKFLOW_DATEI}/dispatches", json={"ref": self.zweig})
+        a = self._anfrage(
+            "POST",
+            f"/actions/workflows/{WORKFLOW_DATEI}/dispatches",
+            json={"ref": self.zweig},
+        )
         if a.status_code == 404:
-            raise GitHubFehler("Der Zeitplan ist noch nicht eingerichtet (oder GitHub kennt ihn noch nicht – "
-                               "nach dem Einrichten eine Minute warten).")
+            raise GitHubFehler(
+                "Der Zeitplan ist noch nicht eingerichtet oder GitHub kennt ihn "
+                "noch nicht. Warte nach dem Einrichten kurz."
+            )
         if a.status_code != 204:
-            raise GitHubFehler(f"Start fehlgeschlagen ({a.status_code}): {a.text[:200]}")
+            raise GitHubFehler(
+                f"Start fehlgeschlagen ({a.status_code}): {a.text[:300]}"
+            )
 
     def letzte_laeufe(self, anzahl: int = 3) -> list[dict]:
-        a = self._anfrage("GET", f"/actions/workflows/{WORKFLOW_DATEI}/runs", params={"per_page": anzahl})
+        a = self._anfrage(
+            "GET",
+            f"/actions/workflows/{WORKFLOW_DATEI}/runs",
+            params={"per_page": anzahl},
+        )
         if a.status_code == 404:
             return []
         a.raise_for_status()
-        return [{"id": r.get("id"), "status": r.get("status"), "ergebnis": r.get("conclusion"),
-                 "start": r.get("created_at"), "art": r.get("event"), "link": r.get("html_url")}
-                for r in a.json().get("workflow_runs", [])]
+        return [
+            {
+                "id": lauf.get("id"),
+                "status": lauf.get("status"),
+                "ergebnis": lauf.get("conclusion"),
+                "start": lauf.get("created_at"),
+                "art": lauf.get("event"),
+                "link": lauf.get("html_url"),
+            }
+            for lauf in a.json().get("workflow_runs", [])
+        ]
 
     def fehlergrund(self, lauf_id) -> str:
-        """Liest das Protokoll eines fehlgeschlagenen Laufs und gibt die Zeile »FEHLER: …« zurück."""
-        import re
-
+        """Liest GitHub-Action-Logs (ZIP) und sucht nach einer FEHLER-Zeile."""
         a = self._anfrage("GET", f"/actions/runs/{lauf_id}/jobs")
         a.raise_for_status()
         jobs = a.json().get("jobs", [])
         if not jobs:
             return ""
-        b = self._anfrage("GET", f"/actions/jobs/{jobs[0]['id']}/logs")
-        if b.status_code != 200:
+
+        log_antwort = self._anfrage(
+            "GET",
+            f"/actions/jobs/{jobs[0]['id']}/logs",
+        )
+        if log_antwort.status_code != 200:
             return ""
-        zeilen = [re.sub(r"^\S+Z\s", "", z) for z in b.text.splitlines()]
-        treffer = [z.split("FEHLER:", 1)[1].strip() for z in zeilen if "FEHLER:" in z]
+
+        inhalt = log_antwort.content
+        textdateien = []
+
+        try:
+            with zipfile.ZipFile(io.BytesIO(inhalt)) as archiv:
+                for name in archiv.namelist():
+                    if name.lower().endswith((".txt", ".log")):
+                        textdateien.append(
+                            archiv.read(name).decode("utf-8", errors="replace")
+                        )
+        except (zipfile.BadZipFile, OSError):
+            # Falls GitHub ausnahmsweise direkt Text zurückgibt.
+            textdateien = [log_antwort.text]
+
+        zeilen = []
+        for datei in textdateien:
+            zeilen.extend(datei.splitlines())
+
+        bereinigt = [re.sub(r"^\S+Z\s", "", zeile) for zeile in zeilen]
+        treffer = [
+            zeile.split("FEHLER:", 1)[1].strip()
+            for zeile in bereinigt
+            if "FEHLER:" in zeile
+        ]
         if treffer:
-            return treffer[-1]
-        # Fallback: letzte aussagekräftige Zeile vor der Fehlermeldung von GitHub
-        nutzbar = [z for z in zeilen if z.strip() and not z.startswith("##[") and "exit code" not in z]
-        return nutzbar[-1][:300] if nutzbar else ""
+            return treffer[-1][:500]
+
+        nutzbar = [
+            zeile.strip()
+            for zeile in bereinigt
+            if zeile.strip()
+            and not zeile.startswith("##[")
+            and "Process completed with exit code" not in zeile
+        ]
+        return nutzbar[-1][:500] if nutzbar else ""
