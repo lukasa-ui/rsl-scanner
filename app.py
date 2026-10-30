@@ -240,7 +240,9 @@ def details_fenster(ticker, name, tageskurse, n, zeile):
 
 st.html("""<div class="rsl-kopf"><h1>RSL-Scanner</h1>
 <p>Die stärksten Aktien der Woche. Nach Levy.</p></div>""")
-tab_scan, tab_einzel, tab_mail, tab_hilfe = st.tabs(["Rangliste", "Aktie suchen", "E-Mail", "Hilfe"])
+tab_scan, tab_depot, tab_einzel, tab_mail, tab_hilfe = st.tabs(
+    ["Rangliste", "Mein Depot", "Aktie suchen", "E-Mail", "Hilfe"]
+)
 listen = k.eigene_listen()
 
 # ---------------- Rangliste
