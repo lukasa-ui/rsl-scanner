@@ -546,4 +546,3 @@ def als_excel(df: pd.DataFrame) -> bytes:
     df.to_excel(puffer, index=False, sheet_name="RSL")
     return puffer.getvalue()
 
-

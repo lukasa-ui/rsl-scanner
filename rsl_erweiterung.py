@@ -78,6 +78,8 @@ def depot_hinzufuegen(daten, ticker, name, rsl):
         "name": str(name),
         "referenz_rsl": float(rsl),
         "hinzugefuegt": datetime.now(timezone.utc).isoformat(),
+        "aufnahme_kurs": None,
+        "sektor": None,
         "stop_aktiv": False,
         "stop_schwelle": 0.75,
         "stop_ausgeloest": False,
@@ -180,3 +182,27 @@ def stop_einmalig_ausloesen(position, aktueller_rsl):
         position["stop_ausgeloest"] = True
 
     return status
+
+
+def rendite_seit_aufnahme(position, kurse):
+    """Kursentwicklung seit Portfolio-Aufnahme; keine Kaufkursrendite."""
+    serie = pd.Series(kurse).dropna().astype(float)
+    if serie.empty:
+        return None
+    aufnahme = position.get("hinzugefuegt")
+    if not aufnahme:
+        return None
+    try:
+        zeitpunkt = pd.Timestamp(aufnahme)
+        if zeitpunkt.tzinfo is not None:
+            zeitpunkt = zeitpunkt.tz_convert(None)
+        basis = serie.loc[serie.index >= zeitpunkt]
+        if basis.empty:
+            basiswert = float(serie.iloc[0])
+        else:
+            basiswert = float(basis.iloc[0])
+        if basiswert <= 0:
+            return None
+        return (float(serie.iloc[-1]) / basiswert - 1) * 100
+    except Exception:
+        return None

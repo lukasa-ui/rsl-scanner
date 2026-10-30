@@ -131,6 +131,11 @@ st.html("""
   .rsl-status li { padding: 0.15rem 0; color: #1D1D1F; }
   .rsl-status li.offen { color: #6E6E73; }
   @media (max-width: 640px) {
+    .block-container { padding: 3.2rem 0.7rem 2rem 0.7rem !important; }
+    [data-testid="stHorizontalBlock"] { gap: 0.45rem !important; flex-wrap: wrap; }
+    [data-testid="column"] { min-width: 100% !important; }
+    [data-testid="stDataFrame"] { overflow-x: auto; }
+    .rsl-kopf { margin-bottom: 1.2rem; }
     .rsl-entw { grid-template-columns: repeat(3, minmax(0, 1fr)); }
     .rsl-werte div strong { font-size: 1.4rem; }
     [role="tab"] { padding: 0.35rem 0.8rem !important; }
@@ -146,15 +151,16 @@ def farbe(v, gut_ab=0.0):
 
 def zeige_tabelle(df: pd.DataFrame, grenze: float, schluessel: str):
     """Schlanke Rangliste: nur die Spalten, die man wirklich liest. Gibt die Zeilenauswahl zurück."""
-    spalten = ["Rang", "Δ Rang", "Ticker", "RSL", "RSL vor 4 Wo.", "Name"] + (["Depot"] if "Depot" in df else [])
+    spalten = ["Rang", "Δ Rang", "Ticker", "RSL", "Trendqualität", "RSL vor 4 Wo.", "Name"] + (["Depot"] if "Depot" in df else [])
     tab = df[spalten + ["Rang %", "Veraltet"]].copy()
     tab["Name"] = [f"{n} ⚠️" if alt else n for n, alt in zip(tab["Name"], tab["Veraltet"])]
     top = tab["Rang %"] <= grenze
     tab = tab[spalten].rename(columns={"Δ Rang": "Δ", "RSL vor 4 Wo.": "vor 4 Wo."})
 
     rsl_fmt = lambda v: "–" if pd.isna(v) else k.de_zahl(v, 3)
+    trend_fmt = lambda v: "–" if pd.isna(v) else f"{v * 100:+.0f} %"
     stil = (tab.style
-            .format({"RSL": rsl_fmt, "vor 4 Wo.": rsl_fmt, "Δ": k.de_rang_delta})
+            .format({"RSL": rsl_fmt, "Trendqualität": trend_fmt, "vor 4 Wo.": rsl_fmt, "Δ": k.de_rang_delta})
             .apply(lambda z: [TOP_HG if top.loc[z.name] else ""] * len(z), axis=1)
             .map(lambda v: "" if pd.isna(v) else f"color:{farbe(v, 1)};font-weight:600", subset=["RSL"])
             .map(lambda v: f"color:{GRAU}", subset=["vor 4 Wo."])
@@ -169,6 +175,7 @@ def zeige_tabelle(df: pd.DataFrame, grenze: float, schluessel: str):
                        "Δ": st.column_config.TextColumn(width=52),
                        "Ticker": st.column_config.TextColumn(width=92),
                        "RSL": st.column_config.TextColumn(width=58),
+                       "Trendqualität": st.column_config.TextColumn(width=92),
                        "vor 4 Wo.": st.column_config.TextColumn(width=72),
                        "Name": st.column_config.TextColumn(width=230),
                        "Depot": st.column_config.TextColumn(width=90)})
@@ -303,6 +310,12 @@ with tab_scan:
                                  (f"\n\nDetails: {fehler}" if fehler else ""))
                 else:
                     df, fehlend = k.screene(kurse, namen, n, "wochen")
+                    if not df.empty:
+                        trendwerte = {}
+                        for ticker in df["Ticker"]:
+                            serie = kurse[ticker].dropna() if ticker in kurse.columns else pd.Series(dtype=float)
+                            trendwerte[ticker] = ext.trendqualitaet(k.wochenschluesse(serie), wochen=26)
+                        df["Trendqualität"] = df["Ticker"].map(trendwerte)
                     fehlend += [t for t in namen if t not in kurse.columns]
                     fehlend += [f"{x} (ISIN bei Yahoo nicht gefunden)" for x in isin_fehlend]
                     st.session_state["ergebnis"] = {
@@ -352,105 +365,57 @@ with tab_scan:
             ereignis = zeige_tabelle(anzeige, grenze, "rangliste")
             st.caption("Zeile antippen für Chart und Kennzahlen. Δ = Plätze seit letzter Woche.")
 
-    # Aktien aus der Rangliste in Depot oder Watchlist übernehmen
+    # Aktie per separater Eingabezeile übernehmen
     if not anzeige.empty:
-        st.markdown("#### Aktie übernehmen")
-    
-        ticker_optionen = anzeige["Ticker"].tolist()
-    
-        ausgewaehlter_ticker = st.selectbox(
-            "Aktie auswählen",
-            ticker_optionen,
-            key="portfolio_auswahl_rangliste",
-        )
-    
-        ausgewaehlte_zeile = anzeige[
-            anzeige["Ticker"] == ausgewaehlter_ticker
-        ].iloc[0]
-    
-        aktion_links, aktion_mitte, aktion_rechts = st.columns(3)
-    
-        if aktion_links.button(
-            "＋ Ins Depot",
-            key="rangliste_ins_depot",
-            width="stretch",
-        ):
-            token = geheimnis("GITHUB_TOKEN")
-            projekt = geheimnis("GITHUB_PROJEKT", "lukasa-ui/rsl-scanner")
-    
-            if not token:
-                st.error("GITHUB_TOKEN fehlt in den Streamlit-Secrets.")
+        st.markdown("#### Aktie hinzufügen")
+        ticker_eingabe = st.text_input(
+            "Ticker oder ISIN", placeholder="z. B. SAP.DE, NVDA oder DE0007164600",
+            key="rangliste_ticker_hinzufuegen"
+        ).strip().upper()
+        name_eingabe = st.text_input("Name (optional)", key="rangliste_name_hinzufuegen")
+        c1, c2 = st.columns(2)
+        if c1.button("＋ Ins Depot", key="rangliste_ins_depot", type="primary", width="stretch"):
+            if not ticker_eingabe:
+                st.warning("Bitte Ticker oder ISIN eingeben.")
             else:
-                import github_verbindung as ghv
-    
-                gh = ghv.GitHub(token, projekt)
-                portfolio = ext.portfolio_laden(gh)
-    
-                ext.depot_hinzufuegen(
-                    portfolio,
-                    ausgewaehlter_ticker,
-                    ausgewaehlte_zeile["Name"],
-                    ausgewaehlte_zeile["RSL"],
-                )
-    
-                ext.portfolio_speichern(gh, portfolio)
-                st.success(
-                    f"{ausgewaehlter_ticker} wurde mit einem Referenz-RSL "
-                    f"von {ausgewaehlte_zeile['RSL']:.3f} ins Depot aufgenommen."
-                )
-                st.rerun()
-    
-        if aktion_mitte.button(
-            "＋ Watchlist",
-            key="rangliste_in_watchlist",
-            width="stretch",
-        ):
-            token = geheimnis("GITHUB_TOKEN")
-            projekt = geheimnis("GITHUB_PROJEKT", "lukasa-ui/rsl-scanner")
-    
-            if not token:
-                st.error("GITHUB_TOKEN fehlt in den Streamlit-Secrets.")
-            else:
-                import github_verbindung as ghv
-    
-                gh = ghv.GitHub(token, projekt)
-                portfolio = ext.portfolio_laden(gh)
-    
-                if ausgewaehlter_ticker in portfolio["depot"]:
-                    st.warning("Die Aktie befindet sich bereits im Depot.")
+                ticker_res = k.isin_zu_ticker(ticker_eingabe) if k.ISIN_MUSTER.match(ticker_eingabe) else ticker_eingabe
+                if not ticker_res:
+                    st.error("Die ISIN konnte keinem Yahoo-Ticker zugeordnet werden.")
+                elif ticker_res not in erg["df"]["Ticker"].values:
+                    st.warning("Der Titel ist nicht in der aktuellen Rangliste. Bitte zuerst unter «Aktie suchen» prüfen oder den passenden Index scannen.")
                 else:
-                    ext.watchlist_hinzufuegen(
-                        portfolio,
-                        ausgewaehlter_ticker,
-                        ausgewaehlte_zeile["Name"],
-                    )
-                    ext.portfolio_speichern(gh, portfolio)
-                    st.success(f"{ausgewaehlter_ticker} wurde vorgemerkt.")
-                    st.rerun()
-    
-        if aktion_rechts.button(
-            "Depot-Status",
-            key="rangliste_depot_status",
-            width="stretch",
-        ):
-            token = geheimnis("GITHUB_TOKEN")
-            projekt = geheimnis("GITHUB_PROJEKT", "lukasa-ui/rsl-scanner")
-    
-            if not token:
-                st.error("GITHUB_TOKEN fehlt in den Streamlit-Secrets.")
+                    zeile_add = erg["df"][erg["df"]["Ticker"] == ticker_res].iloc[0]
+                    token = geheimnis("GITHUB_TOKEN")
+                    if not token:
+                        st.error("GITHUB_TOKEN fehlt in den Streamlit-Secrets.")
+                    else:
+                        import github_verbindung as ghv
+                        gh = ghv.GitHub(token, geheimnis("GITHUB_PROJEKT", "lukasa-ui/rsl-scanner"))
+                        portfolio = ext.portfolio_laden(gh)
+                        ext.depot_hinzufuegen(portfolio, ticker_res, name_eingabe or zeile_add["Name"], zeile_add["RSL"])
+                        ext.portfolio_speichern(gh, portfolio)
+                        st.success(f"{ticker_res} wurde ins Depot aufgenommen.")
+                        st.rerun()
+        if c2.button("＋ Watchlist", key="rangliste_in_watchlist", width="stretch"):
+            if not ticker_eingabe:
+                st.warning("Bitte Ticker oder ISIN eingeben.")
             else:
-                import github_verbindung as ghv
-    
-                gh = ghv.GitHub(token, projekt)
-                portfolio = ext.portfolio_laden(gh)
-    
-                if ausgewaehlter_ticker in portfolio["depot"]:
-                    st.info("Diese Aktie befindet sich bereits im Depot.")
-                elif ausgewaehlter_ticker in portfolio["watchlist"]:
-                    st.info("Diese Aktie befindet sich bereits auf der Watchlist.")
+                ticker_res = k.isin_zu_ticker(ticker_eingabe) if k.ISIN_MUSTER.match(ticker_eingabe) else ticker_eingabe
+                if not ticker_res:
+                    st.error("Die ISIN konnte keinem Yahoo-Ticker zugeordnet werden.")
                 else:
-                    st.info("Diese Aktie ist noch nicht gespeichert.")
-    
+                    token = geheimnis("GITHUB_TOKEN")
+                    if not token:
+                        st.error("GITHUB_TOKEN fehlt in den Streamlit-Secrets.")
+                    else:
+                        import github_verbindung as ghv
+                        gh = ghv.GitHub(token, geheimnis("GITHUB_PROJEKT", "lukasa-ui/rsl-scanner"))
+                        portfolio = ext.portfolio_laden(gh)
+                        ext.watchlist_hinzufuegen(portfolio, ticker_res, name_eingabe or ticker_res)
+                        ext.portfolio_speichern(gh, portfolio)
+                        st.success(f"{ticker_res} wurde vorgemerkt.")
+                        st.rerun()
+
         ersatz = [q for q, _, _, ok in erg["herkunft"] if not ok]
         if ersatz or erg["fehler_quellen"]:
             st.warning("Nicht live abrufbar: " + ", ".join(ersatz + [q for q, _ in erg["fehler_quellen"]])
@@ -547,6 +512,11 @@ with tab_depot:
                     ext.portfolio_speichern(gh, portfolio)
                     st.rerun()
 
+                with st.expander(f"Kurschart und Entwicklung: {ticker}"):
+                    if not kursserie.empty:
+                        zeige_details(ticker, position.get("name", ticker), kursserie, 26)
+                    else:
+                        st.info("Für diesen Titel sind gerade keine Kursdaten verfügbar.")
                 with st.expander(f"Einstellungen: {ticker}"):
                     position["stop_aktiv"] = st.checkbox(
                         "Momentum-Loss-Stop aktivieren",
@@ -584,6 +554,16 @@ with tab_depot:
                     if st.button("Einstellungen speichern", key=f"save_stop_{ticker}"):
                         ext.portfolio_speichern(gh, portfolio)
                         st.success("Gespeichert.")
+
+        # Sektorverteilung des Depots
+        if depot:
+            st.markdown("### Sektorverteilung")
+            sektor_werte = {}
+            for pos in depot.values():
+                s = pos.get("sektor") or "Nicht verfügbar"
+                sektor_werte[s] = sektor_werte.get(s, 0) + 1
+            if sektor_werte:
+                st.bar_chart(pd.DataFrame({"Positionen": sektor_werte}).sort_values("Positionen", ascending=False))
 
         st.divider()
         st.markdown("### Watchlist")
