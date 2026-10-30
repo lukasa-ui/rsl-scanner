@@ -17,6 +17,16 @@
       "stop_aktiv": false,
       "stop_schwelle": 0.75,
       "stop_ausgeloest": false
+    },
+    "BIM.PA": {
+      "name": "bioMérieux",
+      "referenz_rsl": 1.216410629308093,
+      "hinzugefuegt": "2026-10-30T18:59:16.158867+00:00",
+      "aufnahme_kurs": null,
+      "sektor": null,
+      "stop_aktiv": false,
+      "stop_schwelle": 0.75,
+      "stop_ausgeloest": false
     }
   },
   "watchlist": {}
