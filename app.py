@@ -13,7 +13,7 @@ import pandas as pd
 import streamlit as st
 
 import rsl_kern as k
-
+import rsl_erweiterung as ext
 st.set_page_config(page_title="RSL-Scanner", page_icon="📈", layout="centered")
 
 
