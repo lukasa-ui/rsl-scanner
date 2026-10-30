@@ -376,6 +376,153 @@ with tab_scan:
                 d2.download_button("CSV herunterladen", k.als_csv(df), f"rsl_{datum}.csv", "text/csv", width="stretch")
 
 # ---------------- Aktie suchen
+
+# ---------------- Mein Depot
+with tab_depot:
+    st.subheader("Mein Depot und meine Watchlist")
+    st.caption(
+        "Deine Einträge werden dauerhaft in portfolio.json auf GitHub gespeichert. "
+        "Der Referenzwert ist der RSL beim Hinzufügen, nicht dein Kaufkurs."
+    )
+
+    token = geheimnis("GITHUB_TOKEN")
+    projekt = geheimnis("GITHUB_PROJEKT", "lukasa-ui/rsl-scanner")
+
+    if not token:
+        st.error("GITHUB_TOKEN fehlt in den Streamlit-Secrets.")
+    else:
+        import github_verbindung as ghv
+
+        gh = ghv.GitHub(token, projekt)
+
+        try:
+            portfolio = ext.portfolio_laden(gh)
+        except Exception as e:
+            portfolio = ext.neues_portfolio()
+            st.error(f"Portfolio konnte nicht geladen werden: {e}")
+
+        depot = portfolio["depot"]
+        watchlist = portfolio["watchlist"]
+
+        st.markdown("### Depot")
+
+        if not depot:
+            st.info("Noch keine Positionen im Depot.")
+        else:
+            for ticker, position in list(depot.items()):
+                links, mitte, rechts = st.columns([3, 2, 1])
+
+                links.markdown(
+                    f"**{ticker}**  \n{position.get('name', '')}"
+                )
+
+                referenz = float(position.get("referenz_rsl", 0))
+                aktueller_rsl = None
+
+                erg = st.session_state.get("ergebnis")
+                if erg is not None and ticker in erg["df"]["Ticker"].values:
+                    treffer = erg["df"][erg["df"]["Ticker"] == ticker]
+                    if not treffer.empty:
+                        aktueller_rsl = float(treffer.iloc[0]["RSL"])
+
+                if aktueller_rsl is None:
+                    mitte.caption(f"Referenz-RSL: {referenz:.3f}")
+                else:
+                    status = ext.stop_status(position, aktueller_rsl)
+                    mitte.markdown(
+                        f"RSL: **{aktueller_rsl:.3f}**  \n"
+                        f"Referenz: {referenz:.3f} · Stop: {status}"
+                    )
+
+                if rechts.button("Entfernen", key=f"entferne_depot_{ticker}"):
+                    ext.depot_entfernen(portfolio, ticker)
+                    ext.portfolio_speichern(gh, portfolio)
+                    st.rerun()
+
+                with st.expander(f"Einstellungen: {ticker}"):
+                    position["stop_aktiv"] = st.checkbox(
+                        "Momentum-Loss-Stop aktivieren",
+                        value=position.get("stop_aktiv", False),
+                        key=f"stop_aktiv_{ticker}",
+                    )
+
+                    position["stop_schwelle"] = st.slider(
+                        "Stop-Schwelle in % des Referenz-RSL",
+                        min_value=50,
+                        max_value=100,
+                        value=int(position.get("stop_schwelle", 0.75) * 100),
+                        step=5,
+                        key=f"stop_schwelle_{ticker}",
+                    ) / 100
+
+                    if aktueller_rsl is not None:
+                        status = ext.stop_einmalig_ausloesen(position, aktueller_rsl)
+                        if status == "Ausgelöst":
+                            st.error(
+                                "Momentum-Loss-Stop ausgelöst. "
+                                "Der aktuelle RSL liegt unter deiner Schwelle."
+                            )
+                        elif status == "Nähert sich":
+                            st.warning("Der RSL nähert sich deiner Stop-Schwelle.")
+                        elif status == "Sicher":
+                            st.success("Die Position liegt oberhalb der Stop-Schwelle.")
+
+                    if st.button("Einstellungen speichern", key=f"save_stop_{ticker}"):
+                        ext.portfolio_speichern(gh, portfolio)
+                        st.success("Gespeichert.")
+
+        st.divider()
+        st.markdown("### Watchlist")
+
+        if not watchlist:
+            st.info("Deine Watchlist ist noch leer.")
+        else:
+            for ticker, position in list(watchlist.items()):
+                links, rechts = st.columns([4, 1])
+                links.markdown(f"**{ticker}** · {position.get('name', '')}")
+
+                if rechts.button("Entfernen", key=f"entferne_watch_{ticker}"):
+                    ext.watchlist_entfernen(portfolio, ticker)
+                    ext.portfolio_speichern(gh, portfolio)
+                    st.rerun()
+
+        st.divider()
+        st.markdown("### Aktie manuell hinzufügen")
+
+        ticker_neu = st.text_input(
+            "Yahoo-Ticker",
+            placeholder="z. B. SAP.DE oder NVDA",
+            key="portfolio_ticker_neu",
+        ).strip().upper()
+
+        name_neu = st.text_input(
+            "Name",
+            placeholder="Optional",
+            key="portfolio_name_neu",
+        )
+
+        art_neu = st.radio(
+            "Hinzufügen zu",
+            ["Depot", "Watchlist"],
+            horizontal=True,
+        )
+
+        if st.button("Hinzufügen", type="primary", key="portfolio_manuell_hinzufuegen"):
+            if not ticker_neu:
+                st.warning("Bitte einen Ticker eingeben.")
+            elif ticker_neu in depot or ticker_neu in watchlist:
+                st.warning("Dieser Ticker ist bereits vorhanden.")
+            elif art_neu == "Depot":
+                st.warning(
+                    "Für einen Depot-Eintrag muss zuerst ein aktueller RSL-Wert "
+                    "aus einem Scan vorliegen. Füge den Titel über die Rangliste hinzu."
+                )
+            else:
+                ext.watchlist_hinzufuegen(portfolio, ticker_neu, name_neu or ticker_neu)
+                ext.portfolio_speichern(gh, portfolio)
+                st.success(f"{ticker_neu} wurde zur Watchlist hinzugefügt.")
+                st.rerun()
+
 with tab_einzel:
     with st.container(key="karte_suche"):
         suche = st.text_input("Name, ISIN, WKN oder Ticker", placeholder="z. B. Billerud, DE0007164600 oder SAP.DE")
