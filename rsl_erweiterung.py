@@ -1,4 +1,3 @@
-
 """Erweiterungen für Depot, Watchlist, Trendqualität und RSL-Momentum-Stop."""
 
 import json
@@ -16,30 +15,51 @@ def neues_portfolio():
 
 
 def portfolio_laden(github):
-    """Lädt Depot und Watchlist aus portfolio.json auf GitHub."""
-    try:
-        inhalt, _ = github.lies_datei(PORTFOLIO_DATEI)
-        if not inhalt:
-            return neues_portfolio()
+    """Lädt Depot und Watchlist. Technische Fehler werden bewusst weitergegeben."""
+    inhalt, _ = github.lies_datei(PORTFOLIO_DATEI)
 
-        daten = json.loads(inhalt)
-        if not isinstance(daten, dict):
-            return neues_portfolio()
-
-        daten.setdefault("depot", {})
-        daten.setdefault("watchlist", {})
-        return daten
-
-    except Exception:
+    # Eine nicht vorhandene Datei bedeutet ein neues Portfolio.
+    # GitHub-Verbindungs- und Berechtigungsfehler müssen dagegen sichtbar bleiben.
+    if inhalt is None or not inhalt.strip():
         return neues_portfolio()
+
+    try:
+        daten = json.loads(inhalt)
+    except json.JSONDecodeError as exc:
+        raise ValueError(
+            f"{PORTFOLIO_DATEI} enthält kein gültiges JSON. "
+            "Die Datei wurde nicht überschrieben."
+        ) from exc
+
+    if not isinstance(daten, dict):
+        raise ValueError(f"{PORTFOLIO_DATEI} muss ein JSON-Objekt enthalten.")
+
+    depot = daten.get("depot", {})
+    watchlist = daten.get("watchlist", {})
+
+    if not isinstance(depot, dict) or not isinstance(watchlist, dict):
+        raise ValueError(
+            f"{PORTFOLIO_DATEI}: 'depot' und 'watchlist' müssen Objekte sein. "
+            "Die Datei wurde nicht überschrieben."
+        )
+
+    daten["depot"] = depot
+    daten["watchlist"] = watchlist
+    return daten
 
 
 def portfolio_speichern(github, daten):
     """Speichert Depot und Watchlist dauerhaft auf GitHub."""
+    if not isinstance(daten, dict):
+        raise TypeError("Das Portfolio muss ein Dictionary sein.")
+
+    daten.setdefault("depot", {})
+    daten.setdefault("watchlist", {})
+
     github.schreibe_datei(
         PORTFOLIO_DATEI,
         json.dumps(daten, ensure_ascii=False, indent=2),
-        "Depot und Watchlist aktualisiert"
+        "Depot und Watchlist aktualisiert",
     )
 
 
@@ -48,6 +68,12 @@ def depot_hinzufuegen(daten, ticker, name, rsl):
     if rsl is None or pd.isna(rsl):
         raise ValueError("Für diesen Titel liegt kein gültiger RSL-Wert vor.")
 
+    ticker = str(ticker).strip().upper()
+    if not ticker:
+        raise ValueError("Der Ticker darf nicht leer sein.")
+
+    daten.setdefault("depot", {})
+    daten.setdefault("watchlist", {})
     daten["depot"][ticker] = {
         "name": str(name),
         "referenz_rsl": float(rsl),
@@ -56,11 +82,19 @@ def depot_hinzufuegen(daten, ticker, name, rsl):
         "stop_schwelle": 0.75,
         "stop_ausgeloest": False,
     }
-
     daten["watchlist"].pop(ticker, None)
 
 
 def watchlist_hinzufuegen(daten, ticker, name):
+    ticker = str(ticker).strip().upper()
+    if not ticker:
+        raise ValueError("Der Ticker darf nicht leer sein.")
+
+    daten.setdefault("depot", {})
+    daten.setdefault("watchlist", {})
+    if ticker in daten["depot"]:
+        raise ValueError("Die Aktie befindet sich bereits im Depot.")
+
     daten["watchlist"][ticker] = {
         "name": str(name),
         "hinzugefuegt": datetime.now(timezone.utc).isoformat(),
@@ -68,20 +102,17 @@ def watchlist_hinzufuegen(daten, ticker, name):
 
 
 def depot_entfernen(daten, ticker):
-    daten["depot"].pop(ticker, None)
+    daten.setdefault("depot", {}).pop(ticker, None)
 
 
 def watchlist_entfernen(daten, ticker):
-    daten["watchlist"].pop(ticker, None)
+    daten.setdefault("watchlist", {}).pop(ticker, None)
 
 
 def trendqualitaet(kurse, wochen=26):
     """
     Signiertes R² einer linearen Regression auf logarithmierten Wochenkursen.
-    Wertebereich -1 bis +1.
-    Positiv = gleichmäßiger Aufwärtstrend.
-    Negativ = gleichmäßiger Abwärtstrend.
-    Nahe 0 = schwacher oder unruhiger Trend.
+    Positiv = gleichmäßiger Aufwärtstrend, negativ = gleichmäßiger Abwärtstrend.
     """
     try:
         daten = pd.Series(kurse).dropna().astype(float).tail(wochen)
@@ -92,7 +123,6 @@ def trendqualitaet(kurse, wochen=26):
 
         y = np.log(daten.to_numpy())
         x = np.arange(len(y), dtype=float)
-
         steigung, abschnitt = np.polyfit(x, y, 1)
         prognose = steigung * x + abschnitt
 
@@ -105,7 +135,7 @@ def trendqualitaet(kurse, wochen=26):
         r2 = max(0.0, min(1.0, 1.0 - fehler / gesamt))
         return float(math.copysign(r2, steigung))
 
-    except Exception:
+    except (TypeError, ValueError, FloatingPointError):
         return None
 
 
@@ -117,28 +147,33 @@ def stop_status(position, aktueller_rsl):
     if aktueller_rsl is None or pd.isna(aktueller_rsl):
         return "Keine Daten"
 
-    referenz = float(position.get("referenz_rsl", 0))
-    schwelle = float(position.get("stop_schwelle", 0.75))
-
-    if referenz <= 0:
+    try:
+        referenz = float(position.get("referenz_rsl", 0))
+        schwelle = float(position.get("stop_schwelle", 0.75))
+    except (TypeError, ValueError):
         return "Keine Referenz"
 
-    grenzwert = referenz * schwelle
+    if not math.isfinite(referenz) or not math.isfinite(schwelle):
+        return "Keine Referenz"
+    if referenz <= 0 or not 0 < schwelle <= 1:
+        return "Keine Referenz"
 
     if position.get("stop_ausgeloest", False):
         return "Ausgelöst"
 
-    if aktueller_rsl <= grenzwert:
+    grenzwert = referenz * schwelle
+
+    if float(aktueller_rsl) <= grenzwert:
         return "Ausgelöst"
 
-    if aktueller_rsl <= grenzwert * 1.10:
+    if float(aktueller_rsl) <= grenzwert * 1.10:
         return "Nähert sich"
 
     return "Sicher"
 
 
 def stop_einmalig_ausloesen(position, aktueller_rsl):
-    """Speichert, dass der Stop für diese Position bereits ausgelöst wurde."""
+    """Markiert den Stop dauerhaft als ausgelöst; Speichern übernimmt die App."""
     status = stop_status(position, aktueller_rsl)
 
     if status == "Ausgelöst":
