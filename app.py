@@ -506,8 +506,8 @@ with tab_depot:
         try:
             portfolio = ext.portfolio_laden(gh)
         except Exception as e:
-            portfolio = ext.neues_portfolio()
-            st.error(f"Portfolio konnte nicht geladen werden: {e}")
+            st.error(f"Portfolio konnte nicht geladen werden. Es werden keine Änderungen vorgenommen: {e}")
+            st.stop()
 
         depot = portfolio["depot"]
         watchlist = portfolio["watchlist"]
@@ -564,7 +564,13 @@ with tab_depot:
                     ) / 100
 
                     if aktueller_rsl is not None:
+                        stop_war_bereits_ausgeloest = bool(position.get("stop_ausgeloest", False))
                         status = ext.stop_einmalig_ausloesen(position, aktueller_rsl)
+                        if position.get("stop_ausgeloest", False) and not stop_war_bereits_ausgeloest:
+                            try:
+                                ext.portfolio_speichern(gh, portfolio)
+                            except Exception as e:
+                                st.error(f"Stop wurde erkannt, konnte aber nicht auf GitHub gespeichert werden: {e}")
                         if status == "Ausgelöst":
                             st.error(
                                 "Momentum-Loss-Stop ausgelöst. "
