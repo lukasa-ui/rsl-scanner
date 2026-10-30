@@ -7,16 +7,6 @@
       "stop_aktiv": false,
       "stop_schwelle": 0.75,
       "stop_ausgeloest": false
-    },
-    "TILE": {
-      "name": "Interface",
-      "referenz_rsl": 1.076996625790567,
-      "hinzugefuegt": "2026-10-30T18:57:37.728800+00:00",
-      "aufnahme_kurs": null,
-      "sektor": null,
-      "stop_aktiv": false,
-      "stop_schwelle": 0.75,
-      "stop_ausgeloest": false
     }
   },
   "watchlist": {}
