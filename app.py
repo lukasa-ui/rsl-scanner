@@ -343,6 +343,105 @@ with tab_scan:
             ereignis = zeige_tabelle(anzeige, grenze, "rangliste")
             st.caption("Zeile antippen für Chart und Kennzahlen. Δ = Plätze seit letzter Woche.")
 
+# Aktien aus der Rangliste in Depot oder Watchlist übernehmen
+if not anzeige.empty:
+    st.markdown("#### Aktie übernehmen")
+
+    ticker_optionen = anzeige["Ticker"].tolist()
+
+    ausgewaehlter_ticker = st.selectbox(
+        "Aktie auswählen",
+        ticker_optionen,
+        key="portfolio_auswahl_rangliste",
+    )
+
+    ausgewaehlte_zeile = anzeige[
+        anzeige["Ticker"] == ausgewaehlter_ticker
+    ].iloc[0]
+
+    aktion_links, aktion_mitte, aktion_rechts = st.columns(3)
+
+    if aktion_links.button(
+        "＋ Ins Depot",
+        key="rangliste_ins_depot",
+        width="stretch",
+    ):
+        token = geheimnis("GITHUB_TOKEN")
+        projekt = geheimnis("GITHUB_PROJEKT", "lukasa-ui/rsl-scanner")
+
+        if not token:
+            st.error("GITHUB_TOKEN fehlt in den Streamlit-Secrets.")
+        else:
+            import github_verbindung as ghv
+
+            gh = ghv.GitHub(token, projekt)
+            portfolio = ext.portfolio_laden(gh)
+
+            ext.depot_hinzufuegen(
+                portfolio,
+                ausgewaehlter_ticker,
+                ausgewaehlte_zeile["Name"],
+                ausgewaehlte_zeile["RSL"],
+            )
+
+            ext.portfolio_speichern(gh, portfolio)
+            st.success(
+                f"{ausgewaehlter_ticker} wurde mit einem Referenz-RSL "
+                f"von {ausgewaehlte_zeile['RSL']:.3f} ins Depot aufgenommen."
+            )
+            st.rerun()
+
+    if aktion_mitte.button(
+        "＋ Watchlist",
+        key="rangliste_in_watchlist",
+        width="stretch",
+    ):
+        token = geheimnis("GITHUB_TOKEN")
+        projekt = geheimnis("GITHUB_PROJEKT", "lukasa-ui/rsl-scanner")
+
+        if not token:
+            st.error("GITHUB_TOKEN fehlt in den Streamlit-Secrets.")
+        else:
+            import github_verbindung as ghv
+
+            gh = ghv.GitHub(token, projekt)
+            portfolio = ext.portfolio_laden(gh)
+
+            if ausgewaehlter_ticker in portfolio["depot"]:
+                st.warning("Die Aktie befindet sich bereits im Depot.")
+            else:
+                ext.watchlist_hinzufuegen(
+                    portfolio,
+                    ausgewaehlter_ticker,
+                    ausgewaehlte_zeile["Name"],
+                )
+                ext.portfolio_speichern(gh, portfolio)
+                st.success(f"{ausgewaehlter_ticker} wurde vorgemerkt.")
+                st.rerun()
+
+    if aktion_rechts.button(
+        "Depot-Status",
+        key="rangliste_depot_status",
+        width="stretch",
+    ):
+        token = geheimnis("GITHUB_TOKEN")
+        projekt = geheimnis("GITHUB_PROJEKT", "lukasa-ui/rsl-scanner")
+
+        if not token:
+            st.error("GITHUB_TOKEN fehlt in den Streamlit-Secrets.")
+        else:
+            import github_verbindung as ghv
+
+            gh = ghv.GitHub(token, projekt)
+            portfolio = ext.portfolio_laden(gh)
+
+            if ausgewaehlter_ticker in portfolio["depot"]:
+                st.info("Diese Aktie befindet sich bereits im Depot.")
+            elif ausgewaehlter_ticker in portfolio["watchlist"]:
+                st.info("Diese Aktie befindet sich bereits auf der Watchlist.")
+            else:
+                st.info("Diese Aktie ist noch nicht gespeichert.")
+
             ersatz = [q for q, _, _, ok in erg["herkunft"] if not ok]
             if ersatz or erg["fehler_quellen"]:
                 st.warning("Nicht live abrufbar: " + ", ".join(ersatz + [q for q, _ in erg["fehler_quellen"]])
