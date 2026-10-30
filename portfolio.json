@@ -1,0 +1,13 @@
+{
+  "depot": {
+    "SOON.SW": {
+      "name": "Sonova",
+      "referenz_rsl": 1.264950645903093,
+      "hinzugefuegt": "2026-10-30T18:34:50.015902+00:00",
+      "stop_aktiv": false,
+      "stop_schwelle": 0.75,
+      "stop_ausgeloest": false
+    }
+  },
+  "watchlist": {}
+}
