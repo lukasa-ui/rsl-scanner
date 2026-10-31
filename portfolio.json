@@ -45,7 +45,7 @@
       "hinzugefuegt": "2026-10-30T18:59:52.691269+00:00",
       "aufnahme_kurs": null,
       "sektor": "Industrie",
-      "stop_aktiv": false,
+      "stop_aktiv": true,
       "stop_schwelle": 1.0,
       "stop_ausgeloest": false
     },
