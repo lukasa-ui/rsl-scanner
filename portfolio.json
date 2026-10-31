@@ -46,7 +46,7 @@
       "aufnahme_kurs": null,
       "sektor": "Industrie",
       "stop_aktiv": false,
-      "stop_schwelle": 0.75,
+      "stop_schwelle": 1.0,
       "stop_ausgeloest": false
     },
     "FGP.L": {
