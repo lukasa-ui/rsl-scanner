@@ -48,6 +48,17 @@
       "stop_aktiv": false,
       "stop_schwelle": 0.75,
       "stop_ausgeloest": false
+    },
+    "FGP.L": {
+      "name": "FirstGroup",
+      "referenz_rsl": 1.1930394556885109,
+      "rsl_wochen": 26,
+      "hinzugefuegt": "2026-10-31T12:14:56.410797+00:00",
+      "aufnahme_kurs": 216.8000030517578,
+      "sektor": "Industrie",
+      "stop_aktiv": true,
+      "stop_schwelle": 0.75,
+      "stop_ausgeloest": false
     }
   },
   "watchlist": {}
