@@ -6,14 +6,15 @@
       "hinzugefuegt": "2026-10-30T18:34:50.015902+00:00",
       "stop_aktiv": false,
       "stop_schwelle": 0.75,
-      "stop_ausgeloest": false
+      "stop_ausgeloest": false,
+      "sektor": "Gesundheit"
     },
     "DSY.PA": {
       "name": "Dassault Systèmes",
       "referenz_rsl": 1.2346366027682325,
       "hinzugefuegt": "2026-10-30T18:59:06.850226+00:00",
       "aufnahme_kurs": null,
-      "sektor": null,
+      "sektor": "Technologie",
       "stop_aktiv": false,
       "stop_schwelle": 0.75,
       "stop_ausgeloest": false
@@ -23,7 +24,7 @@
       "referenz_rsl": 1.216410629308093,
       "hinzugefuegt": "2026-10-30T19:00:31.783747+00:00",
       "aufnahme_kurs": null,
-      "sektor": null,
+      "sektor": "Gesundheit",
       "stop_aktiv": false,
       "stop_schwelle": 0.75,
       "stop_ausgeloest": false
@@ -33,7 +34,7 @@
       "referenz_rsl": 1.1894188955552099,
       "hinzugefuegt": "2026-10-30T18:59:41.772737+00:00",
       "aufnahme_kurs": null,
-      "sektor": null,
+      "sektor": "Grundstoffe",
       "stop_aktiv": false,
       "stop_schwelle": 0.75,
       "stop_ausgeloest": false
@@ -43,7 +44,7 @@
       "referenz_rsl": 1.156699264111936,
       "hinzugefuegt": "2026-10-30T18:59:52.691269+00:00",
       "aufnahme_kurs": null,
-      "sektor": null,
+      "sektor": "Industrie",
       "stop_aktiv": false,
       "stop_schwelle": 0.75,
       "stop_ausgeloest": false
