@@ -1,4 +1,4 @@
-"""Depot, Watchlist, signierte R²-Trendqualität und RSL-Momentum-Stop."""
+"""Depot, Watchlist, mathematische R²-Trendqualität und RSL-Momentum-Stop."""
 
 import json
 import math
@@ -94,10 +94,9 @@ def watchlist_entfernen(daten, ticker):
 
 
 def trendqualitaet(kurse, wochen=26):
-    """Signiertes R² aus log(Wochenschlusskurs) gegen Zeit.
+    """Mathematisches R² (0..1) der linearen Regression von logarithmierten Wochenschlusskursen.
 
-    Betrag = R² der Regression (0..1); Vorzeichen = Trendsteigung.
-    Ein negatives Ergebnis ist damit KEIN gewöhnliches mathematisches R².
+    R² misst die Güte der Trendlinie, nicht die Richtung oder Prognosewahrscheinlichkeit.
     """
     try:
         wochen = int(wochen)
@@ -112,7 +111,7 @@ def trendqualitaet(kurse, wochen=26):
             return 0.0
         fehler = float(np.sum((y - (steigung * x + abschnitt)) ** 2))
         r2 = float(np.clip(1.0 - fehler / gesamt, 0.0, 1.0))
-        return -r2 if steigung < 0 else r2
+        return r2
     except (TypeError, ValueError, FloatingPointError, np.linalg.LinAlgError):
         return None
 

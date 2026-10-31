@@ -14,6 +14,7 @@ import streamlit as st
 
 import rsl_kern as k
 import rsl_erweiterung as ext
+import rsl_private_depot as priv
 
 def geheimnis(name: str, standard=None):
     """Wert aus den Streamlit-Secrets (App-Einstellungen bei share.streamlit.io)."""
@@ -23,6 +24,28 @@ def geheimnis(name: str, standard=None):
         return standard
 
 st.set_page_config(page_title="RSL-Scanner", page_icon="📈", layout="centered")
+
+# Anmeldung und private Depotablage sind Pflicht. Kein unsicherer Rückfall auf
+# das bisherige öffentliche portfolio.json, auch nicht bei Konfigurationsfehlern.
+_AUTH = geheimnis("auth")
+_PRIVAT_REPO = geheimnis("PORTFOLIO_GITHUB_REPO")
+_PRIVAT_TOKEN = geheimnis("PORTFOLIO_GITHUB_TOKEN")
+_USER_KEY = geheimnis("PORTFOLIO_USER_KEY")
+if not _AUTH or not _PRIVAT_REPO or not _PRIVAT_TOKEN or not _USER_KEY:
+    st.error("Private Anmeldung noch nicht eingerichtet. Google-OIDC sowie privates Depot-Repository "
+             "und die vier Einträge in INSTALLATION_PRIVAT.md konfigurieren.")
+    st.stop()
+if not st.user.is_logged_in:
+    st.title("RSL-Scanner")
+    st.write("Melde dich an, um deine persönliche Rangliste und dein privates Depot zu öffnen.")
+    if st.button("Mit Google anmelden", type="primary"):
+        st.login("google")
+    st.stop()
+if not st.user.get("sub"):
+    st.error("Der Google-Anbieter hat keine stabile Nutzerkennung geliefert. Anmeldung nicht möglich.")
+    st.stop()
+_EIGENES_DEPOT = priv.benutzer_pfad(st.user["sub"], _USER_KEY)
+
 
 
 # ------------------------------------------------------------------ Zwischenspeicher
@@ -103,7 +126,10 @@ st.html("""
   [data-testid="stDataFrame"] { border-radius: 14px; overflow: hidden; }
   [class*="st-key-rangliste_mobil"] { display: none; }
   [class*="st-key-mobile_aktie_"] { margin-bottom: .65rem; }
-  [class*="st-key-karte_depot_"] { margin-bottom: 1rem; border-radius: 18px; }
+  /* Depotliste statt großer Karten: Details nur auf Wunsch aufklappen */
+  [data-testid="stExpander"] details { margin-bottom: .35rem; border: 1px solid #E8E8ED !important; background: #FFFFFF !important; }
+  [data-testid="stExpander"] summary { padding: .3rem .5rem; }
+  [class*="st-key-karte_depot_"] { margin-bottom: .3rem; border-radius: 12px; padding: .5rem !important; }
   @media (max-width: 640px) {
     [class*="st-key-rangliste_mobil"] { display: block; }
     [class*="st-key-rangliste_desktop"] { display: none; }
@@ -160,16 +186,16 @@ def farbe(v, gut_ab=0.0):
 
 def zeige_tabelle(df: pd.DataFrame, grenze: float, schluessel: str):
     """Schlanke Rangliste: nur die Spalten, die man wirklich liest. Gibt die Zeilenauswahl zurück."""
-    spalten = ["Rang", "Δ Rang", "Ticker", "RSL", "Trendqualität", "RSL vor 4 Wo.", "Sektor", "Name"] + (["Depot"] if "Depot" in df else [])
-    tab = df[spalten + ["Rang %", "Veraltet"]].copy()
+    spalten = ["Rang", "Δ Rang", "Ticker", "RSL", "R²", "RSL vor 4 Wo.", "Sektor", "Name"] + (["Depot"] if "Depot" in df else [])
+    tab = df.rename(columns={"Trendqualität": "R²"})[spalten + ["Rang %", "Veraltet"]].copy()
     tab["Name"] = [f"{n} ⚠️" if alt else n for n, alt in zip(tab["Name"], tab["Veraltet"])]
     top = tab["Rang %"] <= grenze
     tab = tab[spalten].rename(columns={"Δ Rang": "Δ", "RSL vor 4 Wo.": "vor 4 Wo."})
 
     rsl_fmt = lambda v: "–" if pd.isna(v) else k.de_zahl(v, 3)
-    trend_fmt = lambda v: "–" if pd.isna(v) else f"{v * 100:+.0f} %"
+    trend_fmt = lambda v: "–" if pd.isna(v) else k.de_zahl(float(v), 2)
     stil = (tab.style
-            .format({"RSL": rsl_fmt, "Trendqualität": trend_fmt, "vor 4 Wo.": rsl_fmt, "Δ": k.de_rang_delta})
+            .format({"RSL": rsl_fmt, "R²": trend_fmt, "vor 4 Wo.": rsl_fmt, "Δ": k.de_rang_delta})
             .apply(lambda z: [TOP_HG if top.loc[z.name] else ""] * len(z), axis=1)
             .map(lambda v: "" if pd.isna(v) else f"color:{farbe(v, 1)};font-weight:600", subset=["RSL"])
             .map(lambda v: f"color:{GRAU}", subset=["vor 4 Wo."])
@@ -184,7 +210,7 @@ def zeige_tabelle(df: pd.DataFrame, grenze: float, schluessel: str):
                        "Δ": st.column_config.TextColumn(width=52),
                        "Ticker": st.column_config.TextColumn(width=92),
                        "RSL": st.column_config.TextColumn(width=58),
-                       "Trendqualität": st.column_config.TextColumn(width=92),
+                       "R²": st.column_config.TextColumn(width=62),
                        "vor 4 Wo.": st.column_config.TextColumn(width=72),
                        "Sektor": st.column_config.TextColumn(width=145),
                        "Name": st.column_config.TextColumn(width=230),
@@ -268,6 +294,10 @@ def details_fenster(ticker, name, tageskurse, n, zeile):
 
 st.html("""<div class="rsl-kopf"><h1>RSL-Scanner</h1>
 <p>Die stärksten Aktien der Woche. Nach Levy.</p></div>""")
+an1, an2 = st.columns([5, 1])
+an1.caption("Angemeldet: " + str(st.user.get("email", "Google-Konto")))
+if an2.button("Abmelden", key="logout"):
+    st.logout()
 tab_scan, tab_depot, tab_einzel, tab_mail, tab_hilfe = st.tabs(
     ["Rangliste", "Mein Depot", "Aktie suchen", "E-Mail", "Hilfe"]
 )
@@ -298,37 +328,40 @@ def _tagesveraenderung(kurse: pd.Series):
 
 # ---------------- Persistenz, Sektoren, Aktionen
 
-@st.cache_data(ttl=45, show_spinner=False)
-def _portfolio_lesen_cache(token, projekt):
+@st.cache_data(ttl=1800, show_spinner=False)
+def _privat_repo_ist_sicher(token, projekt):
     import github_verbindung as ghv
-    return ext.portfolio_laden(ghv.GitHub(token, projekt))
+    return priv.repo_privat_pruefen(ghv.GitHub(token, projekt))
+
+
+@st.cache_data(ttl=45, show_spinner=False)
+def _portfolio_lesen_cache(token, projekt, benutzer_pfad):
+    import github_verbindung as ghv
+    return priv.portfolio_laden(ghv.GitHub(token, projekt), benutzer_pfad)
 
 
 def portfolio_lesen():
-    token = geheimnis("GITHUB_TOKEN")
-    if not token:
-        return None
     try:
-        return _portfolio_lesen_cache(token, geheimnis("GITHUB_PROJEKT", "lukasa-ui/rsl-scanner"))
+        _privat_repo_ist_sicher(_PRIVAT_TOKEN, _PRIVAT_REPO)
+        return _portfolio_lesen_cache(_PRIVAT_TOKEN, _PRIVAT_REPO, _EIGENES_DEPOT)
     except Exception as exc:
-        st.error(f"GitHub-Portfolio konnte nicht geladen werden. Keine Änderungen: {exc}")
+        st.error(f"Privates Depot konnte nicht geladen werden. Keine Änderungen: {exc}")
         return None
 
 
 def portfolio_schreiben(daten):
-    token = geheimnis("GITHUB_TOKEN")
-    if not token:
-        st.error("GITHUB_TOKEN fehlt. Es wurden keine Änderungen gespeichert.")
-        return False
     try:
+        _privat_repo_ist_sicher(_PRIVAT_TOKEN, _PRIVAT_REPO)
         import github_verbindung as ghv
-        gh = ghv.GitHub(token, geheimnis("GITHUB_PROJEKT", "lukasa-ui/rsl-scanner"))
-        ext.portfolio_speichern(gh, daten)
+        gh = ghv.GitHub(_PRIVAT_TOKEN, _PRIVAT_REPO)
+        # Unabhängig vom Cache vor JEDEM Schreiben die Sichtbarkeit neu prüfen.
+        priv.repo_privat_pruefen(gh)
+        priv.portfolio_speichern(gh, _EIGENES_DEPOT, daten)
     except Exception as exc:
-        st.error(f"Änderung konnte nicht auf GitHub gespeichert werden: {exc}")
+        st.error(f"Privates Depot konnte nicht gespeichert werden: {exc}")
         return False
     _portfolio_lesen_cache.clear()
-    st.toast("Portfolio auf GitHub gespeichert.")
+    st.toast("Im privaten Depot gespeichert.")
     return True
 
 
@@ -346,7 +379,7 @@ def sektor_von_yahoo(ticker: str) -> str:
 def aktie_aufnehmen(zeile, ziel):
     daten = portfolio_lesen()
     if daten is None:
-        st.error("Portfolio nicht verfügbar. Prüfe GITHUB_TOKEN und GitHub-Zugriff.")
+        st.error("Privates Depot nicht verfügbar. Prüfe PORTFOLIO_GITHUB_TOKEN und das private Repository.")
         return
     ticker = str(zeile["Ticker"])
     try:
@@ -409,13 +442,13 @@ with tab_scan:
                 namen, herkunft, fehler_quellen = k.sammle_universum(auswahl, listen, lade_index)
             for ticker, name in k.lese_tickertext(zusatz).items():
                 namen.setdefault(ticker, name)
-            depot_roh = k.lade_depot()
+            # Keine gemeinsam im öffentlichen Code-Repository liegende Depotliste lesen.
+            # Nur das aktuell angemeldete Konto darf Depotmarkierungen erzeugen.
             isin_fehlend = []
-            depot = depot_roh
-            if any(k.ISIN_MUSTER.match(t) for t in list(namen) + list(depot_roh)):
+            depot = {}
+            if any(k.ISIN_MUSTER.match(t) for t in namen):
                 with st.spinner("Löse ISINs in Ticker auf …"):
                     namen, isin_fehlend = k.isins_aufloesen(namen, isin_zu_ticker)
-                    depot, _ = k.isins_aufloesen(depot_roh, isin_zu_ticker)
             if not namen:
                 st.session_state.pop("ergebnis", None)
                 st.warning("Wähle eine Liste oder einen Index aus.")
@@ -471,7 +504,7 @@ with tab_scan:
         # Scanner und gespeichertes Depot getrennt, aber Signale anhand der aktuellen Liste.
         gespeichertes = portfolio_lesen()
         depot_ticker = {t: p.get("name", t) for t, p in gespeichertes["depot"].items()} if gespeichertes else {}
-        depot_ticker.update(erg["depot"])  # ältere depot.txt-Einträge ebenfalls kenntlich machen
+        
         df = k.depot_markieren(df, depot_ticker, grenze)
         anzeige = df[df["RSL"] >= min_rsl] if min_rsl else df
         if top:
@@ -483,8 +516,8 @@ with tab_scan:
                     f'<p>Grün hinterlegt. Stand {erg["zeit"]}.</p></div>')
             with st.container(key="rangliste_desktop"):
                 ereignis = zeige_tabelle(anzeige, grenze, "rangliste")
-                st.caption("Zeile auswählen, dann direkt ins Depot oder auf die Watchlist übernehmen. "
-                           "R² zeigt den Betrag der Regressionsgüte; +/− die Trendrichtung.")
+                st.caption("Zeile auswählen und ins private Depot übernehmen. R² (0 bis 1) misst die Güte "
+                           "der Trendlinie über die eingestellten Wochen, nicht die Trendrichtung.")
                 zeilen = ereignis.selection.rows if ereignis is not None else []
                 if zeilen:
                     gewaehlte = anzeige.iloc[zeilen[0]]
@@ -510,7 +543,7 @@ with tab_scan:
                     ticker = str(z["Ticker"])
                     name = html.escape(str(z["Name"]))
                     r2 = z.get("Trendqualität")
-                    r2_text = "–" if pd.isna(r2) else f"{float(r2)*100:+.0f} %"
+                    r2_text = "–" if pd.isna(r2) else k.de_zahl(float(r2), 2)
                     with st.container(key=f"mobile_aktie_{idx}", border=True):
                         st.markdown(f"**#{int(z['Rang'])} · {name}**  \n"
                                     f"`{ticker}` · {z.get('Sektor', 'Unbekannt')}")
@@ -553,12 +586,31 @@ with tab_scan:
 # ---------------- Mein Depot
 with tab_depot:
     st.subheader("Mein Depot und meine Watchlist")
-    st.caption("Daten werden in portfolio.json auf GitHub gespeichert. Die angezeigte "
-               "Entwicklung seit Aufnahme bezieht sich auf den damals gespeicherten Kurs, nicht auf einen Kaufkurs.")
+    st.caption("Dein Depot wird nur deinem Google-Konto zugeordnet und in einem privaten Repository "
+               "gespeichert. Die Entwicklung seit Aufnahme bezieht sich auf einen hinterlegten "
+               "Referenzkurs, nicht zwangsläufig auf deinen Kaufpreis.")
     portfolio = portfolio_lesen()
     if portfolio is not None:
         depot = portfolio["depot"]
         watchlist = portfolio["watchlist"]
+        with st.expander("Bisheriges Depot einmalig importieren", expanded=False):
+            st.caption("Nur im eingeloggten Konto: die vorhandene portfolio.json hier als Datei hochladen. "
+                       "Ein Import ist nur möglich, solange Depot und Watchlist dieses Kontos leer sind.")
+            datei = st.file_uploader("Portfolio-JSON auswählen", type=["json"], key="import_portfolio")
+            if datei is not None:
+                if depot or watchlist:
+                    st.warning("Import gesperrt: Dieses Konto hat bereits Depot- oder Watchlist-Einträge.")
+                else:
+                    try:
+                        importdaten = priv.import_aus_json(datei.getvalue())
+                    except ValueError as exc:
+                        st.error(str(exc))
+                    else:
+                        st.caption(f"{len(importdaten['depot'])} Depotpositionen und "
+                                   f"{len(importdaten['watchlist'])} Watchlist-Einträge erkannt.")
+                        if st.button("Diese Daten in mein privates Depot importieren", key="import_confirm"):
+                            if portfolio_schreiben(importdaten):
+                                st.rerun()
         st.markdown("### Depot")
         if not depot:
             st.info("Noch keine Positionen im Depot. Aktien lassen sich direkt aus der Rangliste übernehmen.")
@@ -598,10 +650,39 @@ with tab_depot:
                 elif ausloesungen:
                     st.error("Stop-Warnung erkannt, konnte aber nicht dauerhaft gespeichert werden.")
 
-            for ticker, position in list(depot.items()):
+            # Einmal berechnen und ausschließlich nach AKTUELLEM RSL sortieren.
+            positionen = []
+            for ticker, position in depot.items():
                 kursserie = kurs_daten[ticker]
                 periode = int(position.get("rsl_wochen", 26))
                 aktuell = k.rsl(k.wochenschluesse(kursserie), periode) if not kursserie.empty else None
+                positionen.append((ticker, position, aktuell))
+            positionen = priv.nach_rsl_sortieren(positionen)
+
+            # Kompakte Gesamtübersicht: alle Titel und Kennzahlen auf einen Blick.
+            uebersicht = []
+            for rang, (ticker, position, aktuell) in enumerate(positionen, 1):
+                kursserie = kurs_daten[ticker]
+                tageswert = _tagesveraenderung(kursserie)
+                seitwert = ext.rendite_seit_aufnahme(position, kursserie)
+                uebersicht.append({
+                    "#": rang,
+                    "Aktie": position.get("name", ticker),
+                    "Ticker": ticker,
+                    "RSL": aktuell,
+                    "Heute (%)": tageswert,
+                    "Seit Aufnahme (%)": seitwert,
+                    "Stop": ext.stop_status(position, aktuell),
+                })
+            st.caption("Nach aktuellem RSL absteigend. Details öffnen sich per Klick auf die Zeile darunter.")
+            st.dataframe(pd.DataFrame(uebersicht), hide_index=True, width="stretch",
+                         column_config={"RSL": st.column_config.NumberColumn(format="%.3f"),
+                                        "Heute (%)": st.column_config.NumberColumn(format="%+.2f"),
+                                        "Seit Aufnahme (%)": st.column_config.NumberColumn(format="%+.2f")})
+
+            for rang, (ticker, position, aktuell) in enumerate(positionen, 1):
+                kursserie = kurs_daten[ticker]
+                periode = int(position.get("rsl_wochen", 26))
                 vorher = _rsl_am_vorherigen_handelstag(kursserie, periode) if not kursserie.empty else None
                 aenderung = _tagesveraenderung(kursserie)
                 seit_aufnahme = ext.rendite_seit_aufnahme(position, kursserie)
@@ -617,46 +698,42 @@ with tab_depot:
                     ausserhalb = False
                     ranghinweis = "Rangstatus nicht prüfbar: Titel im letzten Scan nicht enthalten"
                 trendwert = ext.trendqualitaet(k.wochenschluesse(kursserie), periode) if not kursserie.empty else None
-                tages_text = "–" if aenderung is None else f"{'▲' if aenderung >= 0 else '▼'} {k.de_zahl(aenderung, 2)} %"
-                tages_farbe = GRAU if aenderung is None else farbe(aenderung)
                 kurs_text = "–" if kursserie.empty else k.de_zahl(float(kursserie.iloc[-1]), 2)
                 rsl_text = "–" if aktuell is None else k.de_zahl(aktuell, 3)
                 vorher_text = "–" if vorher is None else k.de_zahl(vorher, 3)
                 referenz_text = "–" if referenz is None else k.de_zahl(float(referenz), 3)
-                rendite_text = "–" if seit_aufnahme is None else \
-                    f"{seit_aufnahme:+.2f} %".replace(".", ",")
-                trend_text = "–" if trendwert is None else f"{trendwert * 100:+.0f} %"
-                with st.container(key=f"karte_depot_{ticker.replace('.', '_')}", border=True):
-                    st.markdown(f"#### {html.escape(position.get('name', ticker))}  \n"
-                                f"`{ticker}` · {html.escape(sektor or 'Unbekannt')}")
+                rendite_text = "–" if seit_aufnahme is None else f"{seit_aufnahme:+.2f} %".replace(".", ",")
+                trend_text = "–" if trendwert is None else k.de_zahl(trendwert, 2)
+                tag_text = "–" if aenderung is None else f"{aenderung:+.2f} %".replace(".", ",")
+                hinweis = " ⚠" if stop in ("Ausgelöst", "Nähert sich") or ausserhalb else ""
+                titel = (f"{rang}. {position.get('name', ticker)} ({ticker}) · "
+                         f"RSL {rsl_text} · Seit {rendite_text}{hinweis}")
+                with st.expander(titel, expanded=False):
+                    st.caption(f"{ticker} · {sektor or 'Unbekannt'} · {ranghinweis}")
                     a, b, c = st.columns(3)
-                    a.metric("Letzter Schlusskurs", kurs_text, tages_text,
+                    a.metric("Schlusskurs", kurs_text, tag_text if aenderung is not None else None,
                              delta_color="normal" if aenderung is not None else "off")
                     b.metric("RSL aktuell", rsl_text,
-                             (f"{aktuell - vorher:+.3f}" if aktuell is not None and vorher is not None else None))
+                             f"{aktuell - vorher:+.3f}" if aktuell is not None and vorher is not None else None)
                     c.metric("Seit Aufnahme", rendite_text)
-                    st.caption(f"RSL am vorherigen Handelstag: {vorher_text} · "
-                               f"Referenz-RSL: {referenz_text} · R²-Trendqualität: {trend_text} · "
-                               f"Periode: {periode} Wochen")
-                    st.caption(ranghinweis)
+                    st.caption(f"RSL Vortag: {vorher_text} · Referenz-RSL: {referenz_text} · "
+                               f"R²: {trend_text} · Zeitraum: {periode} Wochen")
                     if ausserhalb:
-                        st.warning(f"{ticker}: Außerhalb der grünen Top-{grenze}-%-Zone oder RSL unter 1. "
-                                   "Die Warnung verschwindet bei Rückkehr automatisch.")
+                        st.warning(f"{ticker}: Außerhalb der grünen Top-{grenze}-%-Zone oder RSL unter 1.")
                     if stop == "Ausgelöst":
-                        st.error("Momentum-Stop ausgelöst. Der Alarm bleibt bis zum manuellen Zurücksetzen gespeichert.")
+                        st.error("Momentum-Stop ausgelöst. Alarm bleibt bis zum manuellen Zurücksetzen gespeichert.")
                     elif stop == "Nähert sich":
                         st.warning("Der RSL nähert sich der Momentum-Stop-Schwelle.")
                     elif stop == "Keine Daten":
                         st.info("Momentum-Stop momentan nicht prüfbar: Kursdaten fehlen.")
                     elif stop == "Aus":
                         st.caption("Momentum-Stop deaktiviert.")
-
-                    with st.expander("Kurschart, Entwicklung & Kennzahlen"):
+                    if st.toggle("Chart und Kennzahlen anzeigen", key=f"chart_{ticker}"):
                         if not kursserie.empty:
                             zeige_details(ticker, position.get("name", ticker), kursserie, periode)
                         else:
                             st.info("Für diesen Titel sind gerade keine Kursdaten verfügbar.")
-                    with st.expander("Stop-Einstellungen und Position"):
+                    if st.toggle("Stop, Referenzkurs und Position bearbeiten", key=f"details_{ticker}"):
                         aktiv_neu = st.checkbox("Momentum-Stop aktiv", value=position.get("stop_aktiv", False),
                                                 key=f"stop_aktiv_{ticker}")
                         schwelle_neu = st.slider("Stop bei … % des Referenz-RSL", 50, 100,
@@ -664,21 +741,41 @@ with tab_depot:
                                                  step=5, key=f"stop_schwelle_{ticker}")
                         st.caption("Alarmgrenze: Referenz-RSL × eingestellter Prozentsatz. "
                                    "Ein Stop ist eine Warnung, kein automatischer Verkauf.")
-                        if st.button("Einstellungen speichern", key=f"save_stop_{ticker}"):
+                        if st.button("Stop-Einstellungen speichern", key=f"save_stop_{ticker}"):
                             position["stop_aktiv"] = aktiv_neu
                             position["stop_schwelle"] = schwelle_neu / 100
                             if portfolio_schreiben(portfolio):
                                 st.rerun()
                         if position.get("stop_ausgeloest", False):
-                            if st.button("Ausgelösten Stop manuell zurücksetzen", key=f"reset_stop_{ticker}"):
+                            if st.button("Stop-Alarm manuell zurücksetzen", key=f"reset_stop_{ticker}"):
                                 position["stop_ausgeloest"] = False
                                 if portfolio_schreiben(portfolio):
                                     st.rerun()
-                            st.caption("Liegt der aktuelle RSL weiter unter der Schwelle, "
-                                       "wird der Alarm beim nächsten Durchlauf erneut ausgelöst.")
                         if position.get("aufnahme_kurs") is None:
-                            st.caption("Diese ältere Position hat keinen beim Hinzufügen gespeicherten Aufnahmekurs. "
-                                       "Eine historische Rendite wird bewusst nicht geschätzt.")
+                            st.info("Für diese ältere Position wurde damals kein Kurs gespeichert. "
+                                    "Trage einen bekannten Kurs ein oder übernimm ausdrücklich einen historischen "
+                                    "Schlusskurs als Näherung.")
+                            kandidat = priv.schlusskurs_am_aufnahmetag(position, kursserie)
+                            if kandidat:
+                                preis, datum = kandidat
+                                st.caption(f"Historischer Schlusskurs vom {datum}: {k.de_zahl(preis, 2)} "
+                                           "(nicht zwingend der Kurs beim Hinzufügen).")
+                                if st.button("Historischen Schlusskurs als Referenz übernehmen", key=f"hist_{ticker}"):
+                                    position["aufnahme_kurs"] = preis
+                                    position["aufnahme_kurs_quelle"] = f"Historischer Schlusskurs {datum}"
+                                    if portfolio_schreiben(portfolio):
+                                        st.rerun()
+                            preis_manuell = st.number_input("Alternativ Referenzkurs eingeben", min_value=0.0,
+                                                             value=0.0, step=0.01, format="%.2f",
+                                                             key=f"manuell_kurs_{ticker}")
+                            if st.button("Eigenen Referenzkurs speichern", key=f"save_kurs_{ticker}",
+                                         disabled=preis_manuell <= 0):
+                                position["aufnahme_kurs"] = float(preis_manuell)
+                                position["aufnahme_kurs_quelle"] = "Manuell eingetragener Kurs"
+                                if portfolio_schreiben(portfolio):
+                                    st.rerun()
+                        else:
+                            st.caption("Kursreferenz: " + str(position.get("aufnahme_kurs_quelle", "Beim Hinzufügen gespeicherter Kurs")))
                         if st.button("Position entfernen", key=f"entferne_depot_{ticker}"):
                             ext.depot_entfernen(portfolio, ticker)
                             if portfolio_schreiben(portfolio):
@@ -971,15 +1068,15 @@ Die laufende Woche zählt mit dem aktuellsten Kurs. Kurse sind um Dividenden und
 - **Grün hinterlegt:** die besten 30 % (in den Einstellungen änderbar)
 - **Δ:** Plätze gewonnen (▲) oder verloren (▼) seit letzter Woche, »neu« = letzte Woche noch keine RSL
 - **vor 4 Wo.:** die RSL von vor vier Wochen – steigt oder sinkt die Stärke?
-- **Trendqualität:** Vorzeichenbehaftetes R² einer linearen Regression auf logarithmierte Wochenkurse. Der Betrag gibt die R²-Regressionsgüte an (0–100 %), + / − zeigt die Trendrichtung. Ein negatives Vorzeichen ist eine Zusatzkonvention und kein mathematisch negatives R².
+- **R²:** Güte der geraden Trendlinie durch die logarithmierten Wochenschlusskurse. Ein Wert von `0,89` entspricht 89 % erklärter Streuung (keine Erfolgswahrscheinlichkeit). R² liegt zwischen 0 und 1, unabhängig von der Trendrichtung. Standardzeitraum: 26 Wochen, in den Einstellungen änderbar.
 - **Sektor:** Yahoo-Branche, soweit lieferbar, sonst »Unbekannt«. Bei großen Listen portionsweise abrufbar.
 - **Depot:** Warnung, wenn Rang außerhalb der eingestellten grünen Zone oder RSL unter 1 liegt.
 - **⚠️ hinter dem Namen:** seit über 10 Tagen kein neuer Kurs
 - Kurs, Durchschnitt und Datum stehen in der Excel-Datei unter »Mehr zu diesem Scan«.
 
 #### Dateien im GitHub-Projekt
-- `portfolio.json` – Depot und Watchlist mit Referenzkursen, Sektoren und RSL-Stop-Einstellungen.
-- `depot.txt` – ältere Depotliste (nur als ergänzende Scan-Markierung).
+- Private Depots liegen nach Google-Anmeldung in **getrennten Dateien in einem separaten privaten GitHub-Repository**. Das frühere öffentliche `portfolio.json` wird nicht mehr verwendet.
+- `depot.txt` – Altdatei im öffentlichen Repository, wird aus Datenschutzgründen nicht mehr als Depotmarkierung gelesen.
 - `listen/` – eigene Listen, z. B. `listen/beobachtung.txt` (erscheint dann in der Auswahl)
 - `email_einstellungen.txt` – Inhalt der Freitags-E-Mail (am einfachsten im Reiter »E-Mail« ändern)
 - `indizes/` – hinterlegte Indexlisten (DAX-Familie, Euro Stoxx 50, ATX, GCX, LuxX)
