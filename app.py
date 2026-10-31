@@ -101,6 +101,15 @@ st.html("""
   /* Eingabefelder und Aufklapper ruhiger */
   [data-testid="stExpander"] details { border: none !important; background: #F5F5F7; border-radius: 14px; }
   [data-testid="stDataFrame"] { border-radius: 14px; overflow: hidden; }
+  [class*="st-key-rangliste_mobil"] { display: none; }
+  [class*="st-key-mobile_aktie_"] { margin-bottom: .65rem; }
+  [class*="st-key-karte_depot_"] { margin-bottom: 1rem; border-radius: 18px; }
+  @media (max-width: 640px) {
+    [class*="st-key-rangliste_mobil"] { display: block; }
+    [class*="st-key-rangliste_desktop"] { display: none; }
+    [class*="st-key-mobile_aktie_"] [data-testid="column"] { min-width: 0 !important; }
+    [class*="st-key-mobile_aktie_"] .stButton button { padding: .5rem .4rem !important; font-size: .8rem; }
+  }
 
   /* Ergebnis */
   .rsl-ergebnis h2 { font-size: clamp(1.5rem, 4.6vw, 2.1rem); font-weight: 700; letter-spacing: -0.02em;
@@ -151,7 +160,7 @@ def farbe(v, gut_ab=0.0):
 
 def zeige_tabelle(df: pd.DataFrame, grenze: float, schluessel: str):
     """Schlanke Rangliste: nur die Spalten, die man wirklich liest. Gibt die Zeilenauswahl zurück."""
-    spalten = ["Rang", "Δ Rang", "Ticker", "RSL", "Trendqualität", "RSL vor 4 Wo.", "Name"] + (["Depot"] if "Depot" in df else [])
+    spalten = ["Rang", "Δ Rang", "Ticker", "RSL", "Trendqualität", "RSL vor 4 Wo.", "Sektor", "Name"] + (["Depot"] if "Depot" in df else [])
     tab = df[spalten + ["Rang %", "Veraltet"]].copy()
     tab["Name"] = [f"{n} ⚠️" if alt else n for n, alt in zip(tab["Name"], tab["Veraltet"])]
     top = tab["Rang %"] <= grenze
@@ -177,6 +186,7 @@ def zeige_tabelle(df: pd.DataFrame, grenze: float, schluessel: str):
                        "RSL": st.column_config.TextColumn(width=58),
                        "Trendqualität": st.column_config.TextColumn(width=92),
                        "vor 4 Wo.": st.column_config.TextColumn(width=72),
+                       "Sektor": st.column_config.TextColumn(width=145),
                        "Name": st.column_config.TextColumn(width=230),
                        "Depot": st.column_config.TextColumn(width=90)})
 
@@ -191,6 +201,9 @@ def zeige_details(ticker: str, name: str, tageskurse: pd.Series, n: int, zeile=N
     """Detailansicht: Kernzahlen, Wertentwicklung, Chart und Kennzahlen."""
     import altair as alt
 
+    if tageskurse.dropna().empty:
+        st.info("Keine Kursdaten für die Detailansicht vorhanden.")
+        return
     w = k.wochenschluesse(tageskurse)
     wert = k.rsl(w, n)
     st.subheader(name or ticker)
@@ -260,6 +273,74 @@ tab_scan, tab_depot, tab_einzel, tab_mail, tab_hilfe = st.tabs(
 )
 listen = k.eigene_listen()
 
+# ---------------- Persistenz, Sektoren, Aktionen
+
+@st.cache_data(ttl=45, show_spinner=False)
+def _portfolio_lesen_cache(token, projekt):
+    import github_verbindung as ghv
+    return ext.portfolio_laden(ghv.GitHub(token, projekt))
+
+
+def portfolio_lesen():
+    token = geheimnis("GITHUB_TOKEN")
+    if not token:
+        return None
+    try:
+        return _portfolio_lesen_cache(token, geheimnis("GITHUB_PROJEKT", "lukasa-ui/rsl-scanner"))
+    except Exception as exc:
+        st.error(f"GitHub-Portfolio konnte nicht geladen werden. Keine Änderungen: {exc}")
+        return None
+
+
+def portfolio_schreiben(daten):
+    token = geheimnis("GITHUB_TOKEN")
+    if not token:
+        st.error("GITHUB_TOKEN fehlt. Es wurden keine Änderungen gespeichert.")
+        return False
+    try:
+        import github_verbindung as ghv
+        gh = ghv.GitHub(token, geheimnis("GITHUB_PROJEKT", "lukasa-ui/rsl-scanner"))
+        ext.portfolio_speichern(gh, daten)
+    except Exception as exc:
+        st.error(f"Änderung konnte nicht auf GitHub gespeichert werden: {exc}")
+        return False
+    _portfolio_lesen_cache.clear()
+    st.toast("Portfolio auf GitHub gespeichert.")
+    return True
+
+
+@st.cache_data(ttl=24 * 3600, show_spinner=False)
+def sektor_von_yahoo(ticker: str) -> str:
+    """24h-Cache: eine .info-Abfrage pro Ticker, kein Lookup für alle 500 Werte."""
+    try:
+        import yfinance as yf
+        original = (yf.Ticker(ticker).info or {}).get("sector")
+        return k.SEKTOREN.get(original, original) if original else "Unbekannt"
+    except Exception:
+        return "Unbekannt"
+
+
+def aktie_aufnehmen(zeile, ziel):
+    daten = portfolio_lesen()
+    if daten is None:
+        st.error("Portfolio nicht verfügbar. Prüfe GITHUB_TOKEN und GitHub-Zugriff.")
+        return
+    ticker = str(zeile["Ticker"])
+    try:
+        if ziel == "depot":
+            kurs = zeile.get("Kurs")
+            ext.depot_hinzufuegen(daten, ticker, zeile.get("Name", ticker), zeile["RSL"],
+                                  aufnahme_kurs=kurs, sektor=zeile.get("Sektor"),
+                                  rsl_wochen=int(st.session_state.get("ergebnis", {}).get("n", 26)))
+        else:
+            ext.watchlist_hinzufuegen(daten, ticker, zeile.get("Name", ticker))
+    except (TypeError, ValueError) as exc:
+        st.warning(str(exc))
+        return
+    if portfolio_schreiben(daten):
+        st.rerun()
+
+
 # ---------------- Rangliste
 with tab_scan:
     with st.container(key="karte_scan"):
@@ -272,9 +353,8 @@ with tab_scan:
             zusatz = st.text_area("Weitere Ticker oder ISINs", height=70,
                                   placeholder="z. B. SAP.DE ALV.DE oder DE0007164600")
             sp1, sp2 = st.columns(2)
-            grenze = sp1.number_input("Grün markieren: beste … %", 1, 100, 30, 5,
-                                      help="Depotwerte außerhalb dieser Grenze oder mit RSL unter 1 bekommen »Verkaufen«.")
-            n = int(sp2.number_input("Wochen für die RSL", 5, 80, 26, 1))
+            grenze = sp1.number_input("Grün markieren: beste … %", 1, 100, 30, 5, key="grenze_scan")
+            n = int(sp2.number_input("Wochen für die RSL", 5, 80, 26, 1, key="rsl_wochen"))
             sp3, sp4 = st.columns(2)
             top = sp3.number_input("Nur die besten … zeigen (0 = alle)", 0, 2000, 0, 10)
             min_rsl = sp4.number_input("Nur RSL ab (0 = alle)", 0.0, 5.0, 0.0, 0.01, format="%.2f")
@@ -285,350 +365,338 @@ with tab_scan:
         if st.button("Scan starten", type="primary", width="stretch"):
             with st.spinner("Stelle die Liste zusammen …"):
                 namen, herkunft, fehler_quellen = k.sammle_universum(auswahl, listen, lade_index)
-            for t, name in k.lese_tickertext(zusatz).items():
-                namen.setdefault(t, name)
+            for ticker, name in k.lese_tickertext(zusatz).items():
+                namen.setdefault(ticker, name)
             depot_roh = k.lade_depot()
-            isin_fehlend: list[str] = []
+            isin_fehlend = []
             depot = depot_roh
             if any(k.ISIN_MUSTER.match(t) for t in list(namen) + list(depot_roh)):
-                with st.spinner("Suche die Yahoo-Ticker zu den ISINs …"):
+                with st.spinner("Löse ISINs in Ticker auf …"):
                     namen, isin_fehlend = k.isins_aufloesen(namen, isin_zu_ticker)
                     depot, _ = k.isins_aufloesen(depot_roh, isin_zu_ticker)
-
             if not namen:
                 st.session_state.pop("ergebnis", None)
-                st.warning("Wähle oben eine Liste oder einen Index aus.")
+                st.warning("Wähle eine Liste oder einen Index aus.")
             else:
                 with st.spinner(f"Lade Kurse für {len(namen)} Werte …"):
                     kurse, fehler = lade_kurse(tuple(sorted(namen)))
                 if kurse.empty:
                     st.session_state.pop("ergebnis", None)
-                    if "rate" in fehler.lower() or "too many" in fehler.lower():
-                        st.error("Yahoo blockiert gerade zu viele Anfragen. In 15–30 Minuten erneut scannen.")
-                    else:
-                        st.error("Yahoo hat keine Kurse geliefert. Später erneut scannen." +
-                                 (f"\n\nDetails: {fehler}" if fehler else ""))
+                    st.error("Yahoo hat keine Kurse geliefert. " + (fehler or "Bitte später erneut versuchen."))
                 else:
                     df, fehlend = k.screene(kurse, namen, n, "wochen")
                     if not df.empty:
-                        trendwerte = {}
-                        for ticker in df["Ticker"]:
-                            serie = kurse[ticker].dropna() if ticker in kurse.columns else pd.Series(dtype=float)
-                            trendwerte[ticker] = ext.trendqualitaet(k.wochenschluesse(serie), wochen=26)
+                        trendwerte = {
+                            ticker: ext.trendqualitaet(k.wochenschluesse(kurse[ticker].dropna()), wochen=n)
+                            for ticker in df["Ticker"] if ticker in kurse.columns
+                        }
                         df["Trendqualität"] = df["Ticker"].map(trendwerte)
+                        # Yahoo-Metadaten werden getrennt und in kleinen Paketen geladen.
+                        df["Sektor"] = "Unbekannt"
                     fehlend += [t for t in namen if t not in kurse.columns]
                     fehlend += [f"{x} (ISIN bei Yahoo nicht gefunden)" for x in isin_fehlend]
                     st.session_state["ergebnis"] = {
-                        "df": df, "kurse": kurse, "depot": depot, "fehlend": sorted(set(fehlend)), "n": n,
+                        "df": df, "kurse": kurse, "depot": depot,
+                        "fehlend": sorted(set(fehlend)), "n": n,
                         "herkunft": herkunft, "fehler_quellen": fehler_quellen,
                         "zeit": dt.datetime.now().strftime("%d.%m.%Y, %H:%M Uhr"),
                     }
+                    # Erste sichtbare Werte gleich ausstatten; größere Indizes in Portionen nachladen.
+                    st.session_state["scan_sektoren"] = {}
+                    if not df.empty:
+                        with st.spinner("Lade Sektoren der ersten fünf Aktien …"):
+                            for ticker in df["Ticker"].head(5):
+                                st.session_state["scan_sektoren"][ticker] = sektor_von_yahoo(ticker)
+                    st.session_state["mobile_anzahl"] = 15
                     st.session_state.pop("rangliste", None)
                     st.session_state.pop("zuletzt_geoeffnet", None)
 
-    anzeige = pd.DataFrame()
     erg = st.session_state.get("ergebnis")
-    if erg and not erg["df"].empty:
-        df = k.depot_markieren(erg["df"], erg["depot"], grenze)
-        anzeige = df[df["RSL"] >= min_rsl] if min_rsl > 0 else df
+    if erg is not None and not erg["df"].empty:
+        df = erg["df"].copy()
+        # Maximal 20 neue Yahoo-.info-Anfragen je Klick, um große Indizes nicht auszubremsen.
+        bereits = st.session_state.setdefault("scan_sektoren", {})
+        fehlende_sektoren = [t for t in df["Ticker"] if t not in bereits]
+        if fehlende_sektoren:
+            st.caption(f"Sektoren: {len(bereits)} von {len(df)} Titeln geprüft. "
+                       "Yahoo-Sektoren können bei ETFs oder fehlenden Stammdaten unbekannt bleiben.")
+            if st.button("Weitere 20 Sektoren abrufen", key="sektoren_weiter"):
+                with st.spinner("Sektoren von Yahoo abrufen …"):
+                    for ticker in fehlende_sektoren[:20]:
+                        bereits[ticker] = sektor_von_yahoo(ticker)
+                st.rerun()
+        df["Sektor"] = df["Ticker"].map(bereits).fillna("Unbekannt")
+        # Scanner und gespeichertes Depot getrennt, aber Signale anhand der aktuellen Liste.
+        gespeichertes = portfolio_lesen()
+        depot_ticker = {t: p.get("name", t) for t, p in gespeichertes["depot"].items()} if gespeichertes else {}
+        depot_ticker.update(erg["depot"])  # ältere depot.txt-Einträge ebenfalls kenntlich machen
+        df = k.depot_markieren(df, depot_ticker, grenze)
+        anzeige = df[df["RSL"] >= min_rsl] if min_rsl else df
         if top:
             anzeige = anzeige.head(int(top))
         anzeige = anzeige.reset_index(drop=True)
-
         with st.container(key="karte_ergebnis"):
             im_top = int((df["Rang %"] <= grenze).sum())
             st.html(f'<div class="rsl-ergebnis"><h2>{im_top} von {len(df)} Werten in den besten {grenze} %.</h2>'
                     f'<p>Grün hinterlegt. Stand {erg["zeit"]}.</p></div>')
-
-            # Depot als eine ruhige Zeile; Einzelheiten zum Aufklappen
-            if erg["depot"]:
-                ueb = k.depot_uebersicht(erg["df"], erg["depot"], grenze)
-                verk = ueb[ueb["Signal"] == "Verkaufen"]
-                halten = int((ueb["Signal"] == "Halten").sum())
-                text = (f'<b class="v">Verkaufen: {html.escape(", ".join(verk["Ticker"]))}</b>. '
-                        if len(verk) else '<b class="h">Alle Depotwerte halten.</b> ')
-                text += f"{halten} von {len(ueb)} Positionen im grünen Bereich."
-                st.html(f'<div class="rsl-depot{" alarm" if len(verk) else ""}"><span class="punkt"></span>'
-                        f'<span>Depot: {text}</span></div>')
-                with st.expander("Depot im Einzelnen"):
-                    t2 = ueb[["Ticker", "Signal", "Rang", "RSL", "Δ Rang", "Name"]].copy()
-                    st.dataframe(
-                        t2.style.format({"Rang": lambda v: "–" if pd.isna(v) else int(v),
-                                         "RSL": lambda v: "–" if pd.isna(v) else k.de_zahl(v, 3),
-                                         "Δ Rang": lambda v: "–" if pd.isna(v) else k.de_rang_delta(v)}, na_rep="–")
-                        .map(lambda v: f"font-weight:600;color:{GRUEN if v == 'Halten' else ROT}"
-                             if v in ("Halten", "Verkaufen") else "", subset=["Signal"]),
-                        hide_index=True, width="stretch")
-                    st.caption(f"Halten heißt: unter den besten {grenze} % und RSL über 1. "
-                               "Positionen trägst du in der Datei depot.txt auf GitHub ein.")
-
-            ereignis = zeige_tabelle(anzeige, grenze, "rangliste")
-            st.caption("Zeile antippen für Chart und Kennzahlen. Δ = Plätze seit letzter Woche.")
-
-    # Aktie per separater Eingabezeile übernehmen
-    if not anzeige.empty:
-        st.markdown("#### Aktie hinzufügen")
-        ticker_eingabe = st.text_input(
-            "Ticker oder ISIN", placeholder="z. B. SAP.DE, NVDA oder DE0007164600",
-            key="rangliste_ticker_hinzufuegen"
-        ).strip().upper()
-        name_eingabe = st.text_input("Name (optional)", key="rangliste_name_hinzufuegen")
-        c1, c2 = st.columns(2)
-        if c1.button("＋ Ins Depot", key="rangliste_ins_depot", type="primary", width="stretch"):
-            if not ticker_eingabe:
-                st.warning("Bitte Ticker oder ISIN eingeben.")
-            else:
-                ticker_res = k.isin_zu_ticker(ticker_eingabe) if k.ISIN_MUSTER.match(ticker_eingabe) else ticker_eingabe
-                if not ticker_res:
-                    st.error("Die ISIN konnte keinem Yahoo-Ticker zugeordnet werden.")
-                elif ticker_res not in erg["df"]["Ticker"].values:
-                    st.warning("Der Titel ist nicht in der aktuellen Rangliste. Bitte zuerst unter «Aktie suchen» prüfen oder den passenden Index scannen.")
+            with st.container(key="rangliste_desktop"):
+                ereignis = zeige_tabelle(anzeige, grenze, "rangliste")
+                st.caption("Zeile auswählen, dann direkt ins Depot oder auf die Watchlist übernehmen. "
+                           "R² zeigt den Betrag der Regressionsgüte; +/− die Trendrichtung.")
+                zeilen = ereignis.selection.rows if ereignis is not None else []
+                if zeilen:
+                    gewaehlte = anzeige.iloc[zeilen[0]]
+                    ticker = gewaehlte["Ticker"]
+                    st.markdown(f"**Ausgewählt: {html.escape(str(gewaehlte['Name']))} ({ticker})**")
+                    ist_depot = bool(gespeichertes and ticker in gespeichertes["depot"])
+                    ist_watchlist = bool(gespeichertes and ticker in gespeichertes["watchlist"])
+                    a1, a2, a3 = st.columns([1, 1, 1])
+                    if a1.button("＋ Ins Depot", disabled=ist_depot, key="scan_auswahl_depot", width="stretch"):
+                        aktie_aufnehmen(gewaehlte, "depot")
+                    if a2.button("＋ Watchlist", disabled=ist_depot or ist_watchlist,
+                                 key="scan_auswahl_watch", width="stretch"):
+                        aktie_aufnehmen(gewaehlte, "watchlist")
+                    if a3.button("Chart & Details", key="scan_auswahl_details", width="stretch"):
+                        details_fenster(ticker, gewaehlte["Name"], erg["kurse"][ticker], erg["n"], gewaehlte)
                 else:
-                    zeile_add = erg["df"][erg["df"]["Ticker"] == ticker_res].iloc[0]
-                    token = geheimnis("GITHUB_TOKEN")
-                    if not token:
-                        st.error("GITHUB_TOKEN fehlt in den Streamlit-Secrets.")
-                    else:
-                        import github_verbindung as ghv
-                        gh = ghv.GitHub(token, geheimnis("GITHUB_PROJEKT", "lukasa-ui/rsl-scanner"))
-                        portfolio = ext.portfolio_laden(gh)
-                        ext.depot_hinzufuegen(portfolio, ticker_res, name_eingabe or zeile_add["Name"], zeile_add["RSL"])
-                        ext.portfolio_speichern(gh, portfolio)
-                        st.success(f"{ticker_res} wurde ins Depot aufgenommen.")
-                        st.rerun()
-        if c2.button("＋ Watchlist", key="rangliste_in_watchlist", width="stretch"):
-            if not ticker_eingabe:
-                st.warning("Bitte Ticker oder ISIN eingeben.")
-            else:
-                ticker_res = k.isin_zu_ticker(ticker_eingabe) if k.ISIN_MUSTER.match(ticker_eingabe) else ticker_eingabe
-                if not ticker_res:
-                    st.error("Die ISIN konnte keinem Yahoo-Ticker zugeordnet werden.")
-                else:
-                    token = geheimnis("GITHUB_TOKEN")
-                    if not token:
-                        st.error("GITHUB_TOKEN fehlt in den Streamlit-Secrets.")
-                    else:
-                        import github_verbindung as ghv
-                        gh = ghv.GitHub(token, geheimnis("GITHUB_PROJEKT", "lukasa-ui/rsl-scanner"))
-                        portfolio = ext.portfolio_laden(gh)
-                        ext.watchlist_hinzufuegen(portfolio, ticker_res, name_eingabe or ticker_res)
-                        ext.portfolio_speichern(gh, portfolio)
-                        st.success(f"{ticker_res} wurde vorgemerkt.")
-                        st.rerun()
+                    st.caption("Wähle eine Zeile, um Aktionen oder den Detailchart zu öffnen.")
 
-        ersatz = [q for q, _, _, ok in erg["herkunft"] if not ok]
-        if ersatz or erg["fehler_quellen"]:
-            st.warning("Nicht live abrufbar: " + ", ".join(ersatz + [q for q, _ in erg["fehler_quellen"]])
-                       + ". Dafür wurde die hinterlegte Liste verwendet – Details unter »Mehr zu diesem Scan«.")
-    
-        zeilen = ereignis.selection.rows if ereignis is not None else []
-        gewaehlt = anzeige.iloc[zeilen[0]]["Ticker"] if zeilen else None
-        # Fenster nur öffnen, wenn gerade eine neue Zeile angetippt wurde (nicht bei jeder anderen Eingabe)
-        if gewaehlt and st.session_state.get("zuletzt_geoeffnet") != gewaehlt:
-            st.session_state["zuletzt_geoeffnet"] = gewaehlt
-            zeile = erg["df"][erg["df"]["Ticker"] == gewaehlt].iloc[0]
-            details_fenster(gewaehlt, zeile["Name"], erg["kurse"][gewaehlt], erg["n"], zeile)
-        elif not gewaehlt:
-            st.session_state.pop("zuletzt_geoeffnet", None)
-    
-        with st.expander("Mehr zu diesem Scan"):
-            neu = k.neu_in_top(erg["df"], grenze)
-            if not neu.empty:
-                st.markdown(f"**Neu in den besten {grenze} %** seit letzter Woche: "
-                            + ", ".join(f"{r.Ticker} ({r.Rang})" for r in neu.itertuples()))
-            if erg["fehlend"]:
-                st.markdown(f"**Ohne Kursdaten ({len(erg['fehlend'])}):** " + ", ".join(erg["fehlend"]))
-            st.markdown("**Herkunft der Indexlisten:**\n" + "\n".join(
-                f"- {q}: {a} Werte, {h}" for q, a, h, _ in erg["herkunft"]) if erg["herkunft"] else
-                "**Herkunft:** nur eigene Listen.")
-            for q, t in erg["fehler_quellen"]:
-                st.markdown(f"- {q}: nicht geladen ({t})")
-            datum = dt.date.today().isoformat()
-            d1, d2 = st.columns(2)
-            d1.download_button("Excel herunterladen", k.als_excel(df), f"rsl_{datum}.xlsx", width="stretch")
-            d2.download_button("CSV herunterladen", k.als_csv(df), f"rsl_{datum}.csv", "text/csv", width="stretch")
-    
+            with st.container(key="rangliste_mobil"):
+                st.caption("Mobile Rangliste mit direkter Depot- und Watchlist-Aktion")
+                anzahl = int(st.session_state.get("mobile_anzahl", 15))
+                for idx, z in anzeige.head(anzahl).iterrows():
+                    ticker = str(z["Ticker"])
+                    name = html.escape(str(z["Name"]))
+                    r2 = z.get("Trendqualität")
+                    r2_text = "–" if pd.isna(r2) else f"{float(r2)*100:+.0f} %"
+                    with st.container(key=f"mobile_aktie_{idx}", border=True):
+                        st.markdown(f"**#{int(z['Rang'])} · {name}**  \n"
+                                    f"`{ticker}` · {z.get('Sektor', 'Unbekannt')}")
+                        st.markdown(f"RSL **{k.de_zahl(z['RSL'], 3)}** · R²-Trendqualität **{r2_text}** · "
+                                    f"vor 4 Wo. **{k.de_zahl(z['RSL vor 4 Wo.'], 3) if pd.notna(z['RSL vor 4 Wo.']) else '–'}**")
+                        ist_depot = bool(gespeichertes and ticker in gespeichertes["depot"])
+                        ist_watchlist = bool(gespeichertes and ticker in gespeichertes["watchlist"])
+                        m1, m2 = st.columns(2)
+                        if m1.button("Im Depot ✓" if ist_depot else "＋ Ins Depot", disabled=ist_depot,
+                                     key=f"mobile_dep_{idx}", width="stretch"):
+                            aktie_aufnehmen(z, "depot")
+                        if m2.button("Auf Watchlist ✓" if ist_watchlist else "＋ Watchlist",
+                                     disabled=ist_depot or ist_watchlist, key=f"mobile_watch_{idx}", width="stretch"):
+                            aktie_aufnehmen(z, "watchlist")
+                        if st.button("Chart & Details", key=f"mobile_detail_{idx}", width="stretch"):
+                            details_fenster(ticker, z["Name"], erg["kurse"][ticker], erg["n"], z)
+                if len(anzeige) > anzahl and st.button("Weitere 15 Werte anzeigen", key="mehr_mobile"):
+                    st.session_state["mobile_anzahl"] = anzahl + 15
+                    st.rerun()
+
+            with st.expander("Mehr zu diesem Scan"):
+                neu = k.neu_in_top(erg["df"], grenze)
+                if not neu.empty:
+                    st.markdown(f"**Neu in den besten {grenze} %**: "
+                                + ", ".join(f"{r.Ticker} ({r.Rang})" for r in neu.itertuples()))
+                if erg["fehlend"]:
+                    st.markdown(f"**Ohne Kursdaten ({len(erg['fehlend'])}):** " + ", ".join(erg["fehlend"]))
+                st.markdown("**Herkunft der Indexlisten:**\n" + "\n".join(
+                    f"- {q}: {a} Werte, {h}" for q, a, h, _ in erg["herkunft"]) if erg["herkunft"] else
+                    "**Herkunft:** nur eigene Listen.")
+                for q, grund in erg["fehler_quellen"]:
+                    st.markdown(f"- {q}: nicht geladen ({grund})")
+                datum = dt.date.today().isoformat()
+                d1, d2 = st.columns(2)
+                d1.download_button("Excel herunterladen", k.als_excel(df), f"rsl_{datum}.xlsx", width="stretch")
+                d2.download_button("CSV herunterladen", k.als_csv(df), f"rsl_{datum}.csv", "text/csv", width="stretch")
+
 # ---------------- Aktie suchen
 
 # ---------------- Mein Depot
 with tab_depot:
     st.subheader("Mein Depot und meine Watchlist")
-    st.caption(
-        "Deine Einträge werden dauerhaft in portfolio.json auf GitHub gespeichert. "
-        "Der Referenzwert ist der RSL beim Hinzufügen, nicht dein Kaufkurs."
-    )
-
-    token = geheimnis("GITHUB_TOKEN")
-    projekt = geheimnis("GITHUB_PROJEKT", "lukasa-ui/rsl-scanner")
-
-    if not token:
-        st.error("GITHUB_TOKEN fehlt in den Streamlit-Secrets.")
-    else:
-        import github_verbindung as ghv
-
-        gh = ghv.GitHub(token, projekt)
-
-        try:
-            portfolio = ext.portfolio_laden(gh)
-        except Exception as e:
-            st.error(f"Portfolio konnte nicht geladen werden. Es werden keine Änderungen vorgenommen: {e}")
-            st.stop()
-
+    st.caption("Daten werden in portfolio.json auf GitHub gespeichert. Die angezeigte "
+               "Entwicklung seit Aufnahme bezieht sich auf den damals gespeicherten Kurs, nicht auf einen Kaufkurs.")
+    portfolio = portfolio_lesen()
+    if portfolio is not None:
         depot = portfolio["depot"]
         watchlist = portfolio["watchlist"]
-
         st.markdown("### Depot")
-
         if not depot:
-            st.info("Noch keine Positionen im Depot.")
+            st.info("Noch keine Positionen im Depot. Aktien lassen sich direkt aus der Rangliste übernehmen.")
         else:
+            # Ein einziger gebündelter, gecachter Kursabruf statt einer Anfrage je Karte.
+            depot_ticker = tuple(sorted(depot))
+            try:
+                depot_kurse, depot_fehler = lade_kurse(depot_ticker)
+            except Exception as exc:
+                depot_kurse, depot_fehler = pd.DataFrame(), str(exc)
+            if depot_kurse.empty:
+                st.warning("Für das Depot wurden keine aktuellen Kurse geliefert. " + (depot_fehler or ""))
+            kurs_daten = {}
+            ausloesungen = []
+            sektor_updates = []
+            erg_depot = st.session_state.get("ergebnis")
+            for ticker, pos in depot.items():
+                if not pos.get("sektor"):
+                    gefundener_sektor = sektor_von_yahoo(ticker)
+                    if gefundener_sektor != "Unbekannt":
+                        pos["sektor"] = gefundener_sektor
+                        sektor_updates.append(ticker)
+                s = (depot_kurse[ticker].dropna() if ticker in depot_kurse.columns
+                     else pd.Series(dtype=float))
+                if s.empty and erg_depot is not None and ticker in erg_depot["kurse"].columns:
+                    s = erg_depot["kurse"][ticker].dropna()
+                kurs_daten[ticker] = s
+                periode = int(pos.get("rsl_wochen", 26))
+                rsl_aktuell = k.rsl(k.wochenschluesse(s), periode) if not s.empty else None
+                if pos.get("stop_aktiv", False) and not pos.get("stop_ausgeloest", False):
+                    if ext.stop_einmalig_ausloesen(pos, rsl_aktuell) == "Ausgelöst":
+                        ausloesungen.append(ticker)
+            if ausloesungen or sektor_updates:
+                if portfolio_schreiben(portfolio):
+                    if ausloesungen:
+                        st.warning("Momentum-Stop dauerhaft gespeichert: " + ", ".join(ausloesungen))
+                elif ausloesungen:
+                    st.error("Stop-Warnung erkannt, konnte aber nicht dauerhaft gespeichert werden.")
+
             for ticker, position in list(depot.items()):
-                links, mitte, rechts = st.columns([3, 2, 1])
-
-                links.markdown(
-                    f"**{ticker}**  \n{position.get('name', '')}"
-                )
-
-                referenz = float(position.get("referenz_rsl", 0))
-                aktueller_rsl = None
-
-                erg = st.session_state.get("ergebnis")
-                kursserie = pd.Series(dtype=float)
-
-                if erg is not None and ticker in erg["df"]["Ticker"].values:
-                    treffer = erg["df"][erg["df"]["Ticker"] == ticker]
-                    if not treffer.empty:
-                        aktueller_rsl = float(treffer.iloc[0]["RSL"])
-
-                # Kursdaten aus dem letzten Scan wiederverwenden, sonst gezielt nachladen.
-                if erg is not None and ticker in erg.get("kurse", pd.DataFrame()).columns:
-                    kursserie = erg["kurse"][ticker].dropna()
+                kursserie = kurs_daten[ticker]
+                periode = int(position.get("rsl_wochen", 26))
+                aktuell = k.rsl(k.wochenschluesse(kursserie), periode) if not kursserie.empty else None
+                vorher = ext.rsl_vorheriger_handelstag(kursserie, periode) if not kursserie.empty else None
+                aenderung = ext.tagesveraenderung(kursserie)
+                seit_aufnahme = ext.rendite_seit_aufnahme(position, kursserie)
+                sektor = position.get("sektor") or sektor_von_yahoo(ticker)
+                referenz = position.get("referenz_rsl")
+                stop = ext.stop_status(position, aktuell)
+                if erg_depot is not None and ticker in erg_depot["df"]["Ticker"].values:
+                    zeile = erg_depot["df"].loc[erg_depot["df"]["Ticker"] == ticker].iloc[0]
+                    rang_prozent = float(zeile["Rang %"])
+                    ausserhalb = rang_prozent > grenze or float(zeile["RSL"]) < 1
+                    ranghinweis = f"Top {k.de_zahl(rang_prozent, 1)} % im letzten Scan"
                 else:
-                    try:
-                        einzelkurse, kursfehler = k.lade_kurse((ticker,))
-                        if einzelkurse is not None and not einzelkurse.empty and ticker in einzelkurse.columns:
-                            kursserie = einzelkurse[ticker].dropna()
-                    except Exception:
-                        kursserie = pd.Series(dtype=float)
+                    ausserhalb = False
+                    ranghinweis = "Rangstatus nicht prüfbar: Titel im letzten Scan nicht enthalten"
+                trendwert = ext.trendqualitaet(k.wochenschluesse(kursserie), periode) if not kursserie.empty else None
+                tages_text = "–" if aenderung is None else f"{'▲' if aenderung >= 0 else '▼'} {k.de_zahl(aenderung, 2)} %"
+                tages_farbe = GRAU if aenderung is None else farbe(aenderung)
+                kurs_text = "–" if kursserie.empty else k.de_zahl(float(kursserie.iloc[-1]), 2)
+                rsl_text = "–" if aktuell is None else k.de_zahl(aktuell, 3)
+                vorher_text = "–" if vorher is None else k.de_zahl(vorher, 3)
+                referenz_text = "–" if referenz is None else k.de_zahl(float(referenz), 3)
+                rendite_text = "–" if seit_aufnahme is None else \
+                    f"{seit_aufnahme:+.2f} %".replace(".", ",")
+                trend_text = "–" if trendwert is None else f"{trendwert * 100:+.0f} %"
+                with st.container(key=f"karte_depot_{ticker.replace('.', '_')}", border=True):
+                    st.markdown(f"#### {html.escape(position.get('name', ticker))}  \n"
+                                f"`{ticker}` · {html.escape(sektor or 'Unbekannt')}")
+                    a, b, c = st.columns(3)
+                    a.metric("Letzter Schlusskurs", kurs_text, tages_text,
+                             delta_color="normal" if aenderung is not None else "off")
+                    b.metric("RSL aktuell", rsl_text,
+                             (f"{aktuell - vorher:+.3f}" if aktuell is not None and vorher is not None else None))
+                    c.metric("Seit Aufnahme", rendite_text)
+                    st.caption(f"RSL am vorherigen Handelstag: {vorher_text} · "
+                               f"Referenz-RSL: {referenz_text} · R²-Trendqualität: {trend_text} · "
+                               f"Periode: {periode} Wochen")
+                    st.caption(ranghinweis)
+                    if ausserhalb:
+                        st.warning(f"{ticker}: Außerhalb der grünen Top-{grenze}-%-Zone oder RSL unter 1. "
+                                   "Die Warnung verschwindet bei Rückkehr automatisch.")
+                    if stop == "Ausgelöst":
+                        st.error("Momentum-Stop ausgelöst. Der Alarm bleibt bis zum manuellen Zurücksetzen gespeichert.")
+                    elif stop == "Nähert sich":
+                        st.warning("Der RSL nähert sich der Momentum-Stop-Schwelle.")
+                    elif stop == "Keine Daten":
+                        st.info("Momentum-Stop momentan nicht prüfbar: Kursdaten fehlen.")
+                    elif stop == "Aus":
+                        st.caption("Momentum-Stop deaktiviert.")
 
-                if aktueller_rsl is None:
-                    mitte.caption(f"Referenz-RSL: {referenz:.3f}")
-                else:
-                    status = ext.stop_status(position, aktueller_rsl)
-                    mitte.markdown(
-                        f"RSL: **{aktueller_rsl:.3f}**  \n"
-                        f"Referenz: {referenz:.3f} · Stop: {status}"
-                    )
+                    with st.expander("Kurschart, Entwicklung & Kennzahlen"):
+                        if not kursserie.empty:
+                            zeige_details(ticker, position.get("name", ticker), kursserie, periode)
+                        else:
+                            st.info("Für diesen Titel sind gerade keine Kursdaten verfügbar.")
+                    with st.expander("Stop-Einstellungen und Position"):
+                        aktiv_neu = st.checkbox("Momentum-Stop aktiv", value=position.get("stop_aktiv", False),
+                                                key=f"stop_aktiv_{ticker}")
+                        schwelle_neu = st.slider("Stop bei … % des Referenz-RSL", 50, 100,
+                                                 value=int(float(position.get("stop_schwelle", .75)) * 100),
+                                                 step=5, key=f"stop_schwelle_{ticker}")
+                        st.caption("Alarmgrenze: Referenz-RSL × eingestellter Prozentsatz. "
+                                   "Ein Stop ist eine Warnung, kein automatischer Verkauf.")
+                        if st.button("Einstellungen speichern", key=f"save_stop_{ticker}"):
+                            position["stop_aktiv"] = aktiv_neu
+                            position["stop_schwelle"] = schwelle_neu / 100
+                            if portfolio_schreiben(portfolio):
+                                st.rerun()
+                        if position.get("stop_ausgeloest", False):
+                            if st.button("Ausgelösten Stop manuell zurücksetzen", key=f"reset_stop_{ticker}"):
+                                position["stop_ausgeloest"] = False
+                                if portfolio_schreiben(portfolio):
+                                    st.rerun()
+                            st.caption("Liegt der aktuelle RSL weiter unter der Schwelle, "
+                                       "wird der Alarm beim nächsten Durchlauf erneut ausgelöst.")
+                        if position.get("aufnahme_kurs") is None:
+                            st.caption("Diese ältere Position hat keinen beim Hinzufügen gespeicherten Aufnahmekurs. "
+                                       "Eine historische Rendite wird bewusst nicht geschätzt.")
+                        if st.button("Position entfernen", key=f"entferne_depot_{ticker}"):
+                            ext.depot_entfernen(portfolio, ticker)
+                            if portfolio_schreiben(portfolio):
+                                st.rerun()
 
-                if rechts.button("Entfernen", key=f"entferne_depot_{ticker}"):
-                    ext.depot_entfernen(portfolio, ticker)
-                    ext.portfolio_speichern(gh, portfolio)
-                    st.rerun()
-
-                with st.expander(f"Kurschart und Entwicklung: {ticker}"):
-                    if not kursserie.empty:
-                        zeige_details(ticker, position.get("name", ticker), kursserie, 26)
-                    else:
-                        st.info("Für diesen Titel sind gerade keine Kursdaten verfügbar.")
-                with st.expander(f"Einstellungen: {ticker}"):
-                    position["stop_aktiv"] = st.checkbox(
-                        "Momentum-Loss-Stop aktivieren",
-                        value=position.get("stop_aktiv", False),
-                        key=f"stop_aktiv_{ticker}",
-                    )
-
-                    position["stop_schwelle"] = st.slider(
-                        "Stop-Schwelle in % des Referenz-RSL",
-                        min_value=50,
-                        max_value=100,
-                        value=int(position.get("stop_schwelle", 0.75) * 100),
-                        step=5,
-                        key=f"stop_schwelle_{ticker}",
-                    ) / 100
-
-                    if aktueller_rsl is not None:
-                        stop_war_bereits_ausgeloest = bool(position.get("stop_ausgeloest", False))
-                        status = ext.stop_einmalig_ausloesen(position, aktueller_rsl)
-                        if position.get("stop_ausgeloest", False) and not stop_war_bereits_ausgeloest:
-                            try:
-                                ext.portfolio_speichern(gh, portfolio)
-                            except Exception as e:
-                                st.error(f"Stop wurde erkannt, konnte aber nicht auf GitHub gespeichert werden: {e}")
-                        if status == "Ausgelöst":
-                            st.error(
-                                "Momentum-Loss-Stop ausgelöst. "
-                                "Der aktuelle RSL liegt unter deiner Schwelle."
-                            )
-                        elif status == "Nähert sich":
-                            st.warning("Der RSL nähert sich deiner Stop-Schwelle.")
-                        elif status == "Sicher":
-                            st.success("Die Position liegt oberhalb der Stop-Schwelle.")
-
-                    if st.button("Einstellungen speichern", key=f"save_stop_{ticker}"):
-                        ext.portfolio_speichern(gh, portfolio)
-                        st.success("Gespeichert.")
-
-        # Sektorverteilung des Depots
-        if depot:
             st.markdown("### Sektorverteilung")
-            sektor_werte = {}
-            for pos in depot.values():
-                s = pos.get("sektor") or "Nicht verfügbar"
-                sektor_werte[s] = sektor_werte.get(s, 0) + 1
-            if sektor_werte:
-                st.bar_chart(pd.DataFrame({"Positionen": sektor_werte}).sort_values("Positionen", ascending=False))
+            sektoren = {}
+            for ticker, pos in depot.items():
+                sector = pos.get("sektor") or sektor_von_yahoo(ticker)
+                sektoren.setdefault(sector, []).append(ticker)
+            summe = len(depot)
+            sektor_df = pd.DataFrame([
+                {"Sektor": sector, "Positionen": len(ticker_liste),
+                 "Anteil": round(len(ticker_liste) / summe * 100, 1),
+                 "Aktien": ", ".join(ticker_liste)}
+                for sector, ticker_liste in sektoren.items()
+            ]).sort_values("Positionen", ascending=False)
+            if not sektor_df.empty:
+                import altair as alt
+                chart = alt.Chart(sektor_df).mark_bar(cornerRadiusEnd=5).encode(
+                    y=alt.Y("Sektor:N", sort="-x", title=None),
+                    x=alt.X("Positionen:Q", title="Positionen", axis=alt.Axis(tickMinStep=1)),
+                    color=alt.Color("Sektor:N", legend=None,
+                                    scale=alt.Scale(range=["#0071E3", "#248A3D", "#D97706", "#A855F7",
+                                                           "#DB2777", "#0891B2", "#7C3AED", "#DC2626",
+                                                           "#65A30D", "#0D9488", "#F59E0B", "#6366F1"])),
+                    tooltip=["Sektor:N", "Positionen:Q", alt.Tooltip("Anteil:Q", format=".1f"), "Aktien:N"],
+                ).properties(height=max(130, len(sektor_df) * 43))
+                st.altair_chart(chart, width="stretch")
+                st.caption(f"{summe} Positionen in {len(sektoren)} Sektoren (einschließlich unbekannter Branchen).")
+                st.dataframe(sektor_df, hide_index=True, width="stretch",
+                             column_config={"Anteil": st.column_config.NumberColumn("Anteil (%)", format="%.1f")})
+                if "Unbekannt" in sektoren:
+                    st.caption("Für die unter 'Unbekannt' gelisteten Aktien liefert Yahoo derzeit keine Sektordaten.")
 
         st.divider()
         st.markdown("### Watchlist")
-
         if not watchlist:
             st.info("Deine Watchlist ist noch leer.")
         else:
             for ticker, position in list(watchlist.items()):
-                links, rechts = st.columns([4, 1])
-                links.markdown(f"**{ticker}** · {position.get('name', '')}")
+                with st.container(border=True):
+                    a, b = st.columns([3, 1])
+                    a.markdown(f"**{html.escape(position.get('name', ticker))}** · `{ticker}`")
+                    if b.button("Entfernen", key=f"entferne_watch_{ticker}"):
+                        ext.watchlist_entfernen(portfolio, ticker)
+                        if portfolio_schreiben(portfolio):
+                            st.rerun()
+        with st.expander("Anderen Ticker zur Watchlist hinzufügen"):
+            ticker_neu = st.text_input("Yahoo-Ticker / ISIN", key="portfolio_ticker_neu").strip().upper()
+            if st.button("Zur Watchlist hinzufügen", key="portfolio_watch_hinzufuegen"):
+                ticker_neu = isin_zu_ticker(ticker_neu) if k.ISIN_MUSTER.match(ticker_neu) else ticker_neu
+                try:
+                    ext.watchlist_hinzufuegen(portfolio, ticker_neu, ticker_neu)
+                except ValueError as exc:
+                    st.warning(str(exc))
+                else:
+                    if portfolio_schreiben(portfolio):
+                        st.rerun()
 
-                if rechts.button("Entfernen", key=f"entferne_watch_{ticker}"):
-                    ext.watchlist_entfernen(portfolio, ticker)
-                    ext.portfolio_speichern(gh, portfolio)
-                    st.rerun()
-
-        st.divider()
-        st.markdown("### Aktie manuell hinzufügen")
-
-        ticker_neu = st.text_input(
-            "Yahoo-Ticker",
-            placeholder="z. B. SAP.DE oder NVDA",
-            key="portfolio_ticker_neu",
-        ).strip().upper()
-
-        name_neu = st.text_input(
-            "Name",
-            placeholder="Optional",
-            key="portfolio_name_neu",
-        )
-
-        art_neu = st.radio(
-            "Hinzufügen zu",
-            ["Depot", "Watchlist"],
-            horizontal=True,
-        )
-
-        if st.button("Hinzufügen", type="primary", key="portfolio_manuell_hinzufuegen"):
-            if not ticker_neu:
-                st.warning("Bitte einen Ticker eingeben.")
-            elif ticker_neu in depot or ticker_neu in watchlist:
-                st.warning("Dieser Ticker ist bereits vorhanden.")
-            elif art_neu == "Depot":
-                st.warning(
-                    "Für einen Depot-Eintrag muss zuerst ein aktueller RSL-Wert "
-                    "aus einem Scan vorliegen. Füge den Titel über die Rangliste hinzu."
-                )
-            else:
-                ext.watchlist_hinzufuegen(portfolio, ticker_neu, name_neu or ticker_neu)
-                ext.portfolio_speichern(gh, portfolio)
-                st.success(f"{ticker_neu} wurde zur Watchlist hinzugefügt.")
-                st.rerun()
 
 with tab_einzel:
     with st.container(key="karte_suche"):
@@ -861,12 +929,15 @@ Die laufende Woche zählt mit dem aktuellsten Kurs. Kurse sind um Dividenden und
 - **Grün hinterlegt:** die besten 30 % (in den Einstellungen änderbar)
 - **Δ:** Plätze gewonnen (▲) oder verloren (▼) seit letzter Woche, »neu« = letzte Woche noch keine RSL
 - **vor 4 Wo.:** die RSL von vor vier Wochen – steigt oder sinkt die Stärke?
-- **Depot:** Halten = unter den besten 30 % und RSL über 1, sonst Verkaufen
+- **Trendqualität:** Vorzeichenbehaftetes R² einer linearen Regression auf logarithmierte Wochenkurse. Der Betrag gibt die R²-Regressionsgüte an (0–100 %), + / − zeigt die Trendrichtung. Ein negatives Vorzeichen ist eine Zusatzkonvention und kein mathematisch negatives R².
+- **Sektor:** Yahoo-Branche, soweit lieferbar, sonst »Unbekannt«. Bei großen Listen portionsweise abrufbar.
+- **Depot:** Warnung, wenn Rang außerhalb der eingestellten grünen Zone oder RSL unter 1 liegt.
 - **⚠️ hinter dem Namen:** seit über 10 Tagen kein neuer Kurs
 - Kurs, Durchschnitt und Datum stehen in der Excel-Datei unter »Mehr zu diesem Scan«.
 
 #### Dateien im GitHub-Projekt
-- `depot.txt` – deine Positionen, ein Ticker oder eine ISIN pro Zeile, Name hinter `#`
+- `portfolio.json` – Depot und Watchlist mit Referenzkursen, Sektoren und RSL-Stop-Einstellungen.
+- `depot.txt` – ältere Depotliste (nur als ergänzende Scan-Markierung).
 - `listen/` – eigene Listen, z. B. `listen/beobachtung.txt` (erscheint dann in der Auswahl)
 - `email_einstellungen.txt` – Inhalt der Freitags-E-Mail (am einfachsten im Reiter »E-Mail« ändern)
 - `indizes/` – hinterlegte Indexlisten (DAX-Familie, Euro Stoxx 50, ATX, GCX, LuxX)
