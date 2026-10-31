@@ -47,7 +47,7 @@
       "sektor": "Industrie",
       "stop_aktiv": true,
       "stop_schwelle": 1.0,
-      "stop_ausgeloest": false
+      "stop_ausgeloest": true
     },
     "FGP.L": {
       "name": "FirstGroup",
