@@ -38,3 +38,11 @@ Wenn `GITHUB_TOKEN` fehlt oder GitHub nicht erreichbar ist, werden Änderungen *
 ## 5. Verifikation und Grenzen
 
 Das Paket wurde offline auf Python-Syntax, R²-, Portfolio-, Rendite- und Stop-Funktionen geprüft. Es wurde **nicht** mit echter Streamlit-Oberfläche und aktuellen Yahoo-/GitHub-Verbindungen im Produktivbetrieb ausgeführt. Nach dem GitHub-Commit den Browser-Test aus Schritt 3 durchführen.
+
+## 6. Fehlerbehebung 31.10.2026: `AttributeError` im Depot
+
+Im Screenshot wird in `app.py` Zeile 563 `ext.rsl_vorheriger_handelstag(...)` aufgerufen. Die ursprüngliche `rsl_erweiterung.py` kennt diesen Funktionsnamen nicht; das Gleiche gilt für `ext.tagesveraenderung(...)`. Die korrigierte `app.py` enthält beide Tagesvergleiche jetzt selbst und kann auch mit der ursprünglichen Erweiterung geladen werden. Auch der Depot-Zugang unterstützt die ältere Signatur von `depot_hinzufuegen`, ohne bestehende Positionen zu überschreiben.
+
+**Schnelle Reparatur:** Nur die Datei `app.py` aus dem Update-ZIP in GitHub ersetzen (Repository-Wurzel, nicht in einen neuen Unterordner). Am sichersten auch `rsl_erweiterung.py` aus dem gleichen ZIP abgleichen. `portfolio.json` unverändert lassen. Anschließend auf Streamlit Community Cloud die App neu starten bzw. auf den neuen Commit warten. Die Funktions- und simulierten App-Tests sind offline ausgeführt; der Live-Streamlit-Cloud-Betrieb konnte nicht validiert werden.
+
+Hinweis: Ein automatischer GitHub-Commit aus ChatGPT wurde versucht, aber GitHub hat ihn mit HTTP 403 (Integration nicht schreibberechtigt) abgewiesen. Die Live-Dateien wurden nicht geändert.

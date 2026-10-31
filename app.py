@@ -273,6 +273,29 @@ tab_scan, tab_depot, tab_einzel, tab_mail, tab_hilfe = st.tabs(
 )
 listen = k.eigene_listen()
 
+# ---------------- Tagesvergleiche (unabhängig von der Erweiterungs-Version)
+
+def _rsl_am_vorherigen_handelstag(kurse: pd.Series, wochen: int):
+    """RSL mit den Kursen BIS zum vorletzten vorhandenen Handelstag.
+
+    Diese kleine Berechnung liegt bewusst in app.py: Eine ältere, von
+    Streamlit noch zwischengespeicherte rsl_erweiterung.py darf die ganze
+    Oberfläche nicht durch einen fehlenden Funktionsnamen lahmlegen.
+    """
+    reihe = pd.Series(kurse).dropna()
+    if len(reihe) < 2:
+        return None
+    return k.rsl(k.wochenschluesse(reihe.iloc[:-1]), int(wochen))
+
+
+def _tagesveraenderung(kurse: pd.Series):
+    """Veränderung zum letzten verfügbaren vorherigen Schlusskurs in Prozent."""
+    reihe = pd.to_numeric(pd.Series(kurse), errors="coerce").dropna()
+    if len(reihe) < 2 or reihe.iloc[-2] <= 0:
+        return None
+    return (float(reihe.iloc[-1]) / float(reihe.iloc[-2]) - 1) * 100
+
+
 # ---------------- Persistenz, Sektoren, Aktionen
 
 @st.cache_data(ttl=45, show_spinner=False)
@@ -329,9 +352,28 @@ def aktie_aufnehmen(zeile, ziel):
     try:
         if ziel == "depot":
             kurs = zeile.get("Kurs")
-            ext.depot_hinzufuegen(daten, ticker, zeile.get("Name", ticker), zeile["RSL"],
-                                  aufnahme_kurs=kurs, sektor=zeile.get("Sektor"),
-                                  rsl_wochen=int(st.session_state.get("ergebnis", {}).get("n", 26)))
+            import inspect
+            name = zeile.get("Name", ticker)
+            periode = int(st.session_state.get("ergebnis", {}).get("n", 26))
+            sektor = zeile.get("Sektor")
+            # Ältere Streamlit-Prozesse können noch die ursprüngliche Version
+            # der Erweiterung geladen haben. Auch dann kein TypeError und
+            # vor allem kein Überschreiben bestehender Depotpositionen.
+            if "aufnahme_kurs" in inspect.signature(ext.depot_hinzufuegen).parameters:
+                ext.depot_hinzufuegen(daten, ticker, name, zeile["RSL"],
+                                      aufnahme_kurs=kurs, sektor=sektor,
+                                      rsl_wochen=periode)
+            else:
+                if ticker in daten.get("depot", {}):
+                    raise ValueError("Diese Aktie ist bereits im Depot.")
+                ext.depot_hinzufuegen(daten, ticker, name, zeile["RSL"])
+                pos = daten["depot"][ticker]
+                pos["rsl_wochen"] = periode
+                pos["aufnahme_kurs"] = float(kurs) if pd.notna(kurs) and float(kurs) > 0 else None
+                pos["sektor"] = sektor if pd.notna(sektor) and sektor != "Unbekannt" else None
+                pos["stop_aktiv"] = True
+                pos["stop_schwelle"] = 0.75
+                pos["stop_ausgeloest"] = False
         else:
             ext.watchlist_hinzufuegen(daten, ticker, zeile.get("Name", ticker))
     except (TypeError, ValueError) as exc:
@@ -560,8 +602,8 @@ with tab_depot:
                 kursserie = kurs_daten[ticker]
                 periode = int(position.get("rsl_wochen", 26))
                 aktuell = k.rsl(k.wochenschluesse(kursserie), periode) if not kursserie.empty else None
-                vorher = ext.rsl_vorheriger_handelstag(kursserie, periode) if not kursserie.empty else None
-                aenderung = ext.tagesveraenderung(kursserie)
+                vorher = _rsl_am_vorherigen_handelstag(kursserie, periode) if not kursserie.empty else None
+                aenderung = _tagesveraenderung(kursserie)
                 seit_aufnahme = ext.rendite_seit_aufnahme(position, kursserie)
                 sektor = position.get("sektor") or sektor_von_yahoo(ticker)
                 referenz = position.get("referenz_rsl")
